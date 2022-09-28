@@ -5,6 +5,7 @@
 // regular slashes in file paths are allowed and encouraged:
 // C:/custom/pepega/pepega/mods
 
+
 {
 	// minimal requirement: path to the folder containing folders with modules
 	// the required structure is:
@@ -17,15 +18,24 @@
 	//			- file1.css
 	//			- file2.css
 	//		- module_name
-	"jsmodules": "",
+	"jsmodules": "mods",
 
 	// minimal requirement: function pool name (where to store all the functions)
-	"sys_name": "",
+	"sys_name": "pepega",
+
+	// explicitly define the module order.
+	// the specified modules are put in order and then unspecified modules are added
+	// if module does not exist - ignore
+	// only counts if points to a valid destination. Otherwise - ignore.
+	"modules_explicit": [
+		"msg_lexer_ppg",
+		"chat_system"
+	],
 
 	// Path to the root folder containing modules folder, variables, fonts, etc
 	// If not present, false, empty, null or invalid - each path field would require an absolute path
 	// otherwise - hybrid: If absoulte, then use absolute, if relative then use relative
-	"project": false,
+	"project": "C:/custom/pepega/pepega",
 
 	// folder name with compiled modules
 	// auto = use original modules folder name
@@ -38,7 +48,7 @@
 	"writesuffix": "auto",
 
 	// if this is set to true then it means that only onefile should be generated
-	"onlyfile": true,
+	"onlyfile": false,
 
 	// the onefile option, if present, specifies that the whole thing should additionaly be compiled into a single file
 	"onefile": {
@@ -50,7 +60,7 @@
 
 		// path to the file to use as the header of the entire file
 		// only counts if points to a valid file. Otherwise - ignore.
-		"header_pre": false,
+		"header_pre": "pep_header.js",
 
 		// path to the file to use as the header AFTER vars declaration and library links
 		// only counts if points to a valid file. Otherwise - ignore.
