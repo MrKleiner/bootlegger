@@ -1,0 +1,114 @@
+// config files for bootlegger can have LINE comments BUT NOT additive comments:
+// good: // comment
+// bad: "mdn": "link", // link to MDN
+
+{
+	// minimal requirement: path to the folder containing folders with modules
+	// the required structure is:
+	// - root_folder
+	// 		- module_name
+	//		- module_name
+	//		- module_name
+	//			- file1.js
+	//			- file2.js
+	//			- file1.css
+	//			- file2.css
+	//		- module_name
+	"jsmodules": "",
+
+	// Path to the root folder containing modules folder, variables, fonts, etc
+	// If not present, false, empty, null or invalid - each path field would require an absolute path
+	// otherwise - hybrid: If absoulte, then use absolute, if relative then use relative
+	"project": false,
+
+	// folder name with compiled modules
+	// auto = use original modules folder name
+	"writename": "auto",
+
+	// This is ignored if writename is specified
+	// If writename is not specified then this suffix is added 
+	// to the name of the folder cotaining compiled modules
+	// auto = the same as not specifying this parameter
+	"writesuffix": "auto",
+
+	// if this is set to true then it means that only onefile should be generated
+	"onlyfile": true,
+
+	// the onefile option, if present, specifies that the whole thing should additionaly be compiled into a single file
+	"onefile": {
+		
+		// where to put the compiled onefile thing.
+		// if not present or false - the file is being output to the root directory of the modules folder
+		"output_to": false,
+
+
+		// path to the file to use as the header of the entire file
+		// only counts if points to a valid file. Otherwise - ignore.
+		"header_pre": false,
+
+		// path to the file to use as the header AFTER vars declaration and library links
+		// only counts if points to a valid file. Otherwise - ignore.
+		"header": false,
+
+		// put the contents of this file in the very bottom of the resulting file
+		// only counts if points to a valid file. Otherwise - ignore.
+		"footer": false,
+
+		// whether to sign libraries with their folder names or not
+		"sign_libs": true,
+
+		// folder containing folders with libraries to include in the file
+		// only counts if present, not false, not empty and not null
+		"libs": false,
+
+
+		// Only counts if present, not false, not empty and not null
+		// then this should contain subpaths to the libraries, aka "jquery/3_6_0/jquery.min.js"
+		
+		// this option is additive: Entries present in this array will be ignored
+		// when traversing through the "libs" parameter
+		
+		// the root of the subpath will be used as the library name
+		// ignored if invalid
+		"libs_explicit": [
+			"dexie_js/3_0_3/dexie_3_0_3.min.js",
+			"jszip/dexie_3_0_3.min.js"
+		],
+
+
+		// only counts if present, not false, not empty and not null
+		// manually add libraries
+		// (lame shit)
+		"add_libs": [
+			{
+				// The name of the library.
+				// If not present then the basename of the filename is used
+				"art_name": "boot",
+				// path to the javascript file
+				// false = skip
+				"path": false
+			}
+		],
+
+
+		// only counts if present, not false, not empty and not null
+		// add fonts as binaries
+		// should point to a folder with a number of subfolders where each file is a font:
+		// font_name(doesnt matter).weight.style.ttf/woff/whatever
+		// e.g. roboto.400.italic.ttf
+		// folder name is used as the font family name
+		"bin_fonts": "",
+
+
+		// only counts if present, not false, not empty and not null
+		// should point to a folder where each file:
+		// location.location.varname.text/bytes/json.decorator(any extension)
+		// location is relative to const btg = {}
+		"variables": "",
+	}
+}
+
+
+
+
+
