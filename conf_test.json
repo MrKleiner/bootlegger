@@ -75,7 +75,7 @@
 
 		// folder containing folders with libraries to include in the file
 		// only counts if present, not false, not empty and not null
-		"libs": false,
+		"libs": "libs",
 
 
 		// Only counts if present, not false, not empty and not null
@@ -87,7 +87,7 @@
 		// the root of the subpath will be used as the library name
 		// ignored if invalid
 		"libs_explicit": [
-			"dexie_js/3_0_3/dexie_3_0_3.min.js",
+			"dexie/3_0_3/dexie_3_0_3.min.js",
 			"jszip/dexie_3_0_3.min.js"
 		],
 

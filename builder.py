@@ -32,6 +32,46 @@ if not isinstance(cfg.get('modules_explicit'), list):
 
 
 
+
+
+def path_resolver(query=None, tp='dir'):
+	if query == None:
+		return
+
+	if tp == 'dir':
+		# if specified path exists as an absolute path
+		# then use it right away
+		if Path(str(query)).is_dir():
+			resolved = Path(query)
+		elif (Path(str(rootdir)) / Path(str(query))).is_dir():
+			# if it's not absolute - try as relative to the project
+			resolved = rootdir / Path(query)
+		else:
+			resolved = None
+	else:
+		# if specified path exists as an absolute path
+		# then use it right away
+		if Path(str(query)).is_file():
+			resolved = Path(query)
+		elif (Path(str(rootdir)) / Path(str(query))).is_file():
+			# if it's not absolute - try as relative to the project
+			resolved = rootdir / Path(query)
+		else:
+			resolved = None
+
+	return resolved
+
+
+
+
+
+
+
+
+
+
+
+
 # js modules dict
 # key: module name
 # value: array of text files
@@ -59,15 +99,10 @@ def compile_folders():
 		print('ERROR: Minimal requirement not met: sys_name is not defined')
 		return
 
-	eval_path = Path(cfg['jsmodules'])
 	
 	# test for absolute path:
 	# if it's an abs path then use it right away
-	modules_pool = None
-	if eval_path.is_dir():
-		modules_pool = eval_path
-	elif ((rootdir or Path('nil')) / eval_path).is_dir():
-		modules_pool = rootdir / eval_path
+	modules_pool = path_resolver(cfg['jsmodules'], 'dir')
 	
 	# if it's still none - invalid path
 	if not modules_pool:
@@ -141,11 +176,13 @@ def compile_folders():
 			# replace shortcuts...
 			print('reading', mfile)
 			hotkeys = (
-				'if (!window.bootlegger.' + md.basename + '){}'
 				mfile.read_text(encoding='UTF-8')
 				.replace('$this', 'window.bootlegger.' + md.basename)
 				.replace('$all', 'window.bootlegger')
+				.replace('$storage', 'window.bootlegger_storage')
 			)
+			if mfile.suffix.lower() == '.js':
+				hotkeys = 'if (!window.bootlegger.' + md.basename + '){window.bootlegger.' + md.basename + '={}}' + '\n' + hotkeys
 
 			# if not onlyfile then write shit to a compiled place
 			if not onlyfile:
@@ -157,6 +194,10 @@ def compile_folders():
 				js_mods[md.name].append(hotkeys)
 			if mfile.suffix.lower() == '.css':
 				css_mods[md.name].append(hotkeys)
+
+
+
+
 
 
 
@@ -184,6 +225,47 @@ def modules_as_ordered():
 		final_order_js.append('\n'.join(css_mods[lefts]))
 
 	return {'js': '\n'.join(final_order_js)}
+
+
+
+
+
+def get_libs():
+	libs_path = path_resolver(cfg['onefile'].get('libs'))
+	if libs_path == None:
+		return b''
+
+	initial_base = {}
+
+	sorted_libs = []
+
+	# simply get the first JS file in sight
+	for lib in libs_path.glob('*'):
+		initial_base[lib.name] = [l for l in lib.rglob('*.js')][0].read_text(encoding='utf-8')
+	# print(initial_base)
+	# first, append sorted
+	for sort_lib in cfg['onefile']['libs_explicit']:
+		try:
+			pull = Path(sort_lib)
+			print((libs_path / pull))
+			sorted_libs.append(('\n'*15) + text2art(sort_lib, font='alligator') + ('\n'*2) + (libs_path / pull).read_bytes())
+			del initial_base[sort_lib]
+		except:
+			pass
+	# and then the rest
+	for remain in initial_base:
+		try:
+			pull = Path(remain)
+			sorted_libs.append(('\n'*15) + text2art(sort_lib, font='alligator') + ('\n'*2) + (libs_path / remain).read_bytes())
+		except:
+			pass
+	return '\n'.join(sorted_libs).encode()
+
+
+
+
+
+
 
 
 # ====================================
@@ -215,16 +297,9 @@ if onefile:
 	# evaluate onefile location
 	#
 
-	# if specified path exists as an absolute path
-	# then use it right away
-	if Path(str(cfg['onefile'].get('output_to'))).is_dir():
-		onefile_path = Path(cfg['onefile']['output_to'])
-	elif (Path(str(rootdir)) / Path(str(cfg['onefile'].get('output_to')))).is_dir():
-		# if it's not absolute - try as relative to the project
-		onefile_path = rootdir / cfg['onefile']['output_to']
-	else:
-		# finally, if nothing above worked - use the parent dir of the modules input
-		onefile_path = Path(cfg['jsmodules']).parent / (cfg['sys_name'] + '.comp.js')
+	# either specified path OR parent dir of the modules folder
+	onefile_path = (path_resolver(cfg['onefile'].get('output_to'), 'dir') or Path(cfg['jsmodules']).parent) / (cfg['sys_name'] + '.comp.js')
+
 
 	# wipe the onefile file
 	with open(str(onefile_path), 'w', encoding='utf-8') as wiper:
@@ -245,32 +320,22 @@ if onefile:
 	# --------------------------------------
 	# write header, if any
 	# --------------------------------------
-
-	# eval the path...
-	# this is getting old...
-
-	# check if we have to add it at all...
-	if cfg['onefile'].get('header_pre'):
-		# check for absolute
-		if Path(str(cfg['onefile']['header_pre'])).is_file():
-			header_src = (Path(cfg['onefile']['header_pre'])).read_bytes()
-		elif (Path(str(rootdir)) / Path(str(cfg['onefile']['header_pre']))).is_file():
-			# now check for relative path
-			header_src = (Path(rootdir) / Path(cfg['onefile']['header_pre'])).read_bytes()
-		else:
-			# otherwise - dont add shit
-			header_src = b''
-
-		onef.write(header_src)
+	header_src = path_resolver(cfg['onefile'].get('header_pre'), 'file') or b''
+	onef.write(header_src if isinstance(header_src, bytes) else header_src.read_bytes())
 
 
 	# --------------------------------------
 	# separator
 	# --------------------------------------
 	onef.write(b'\n'*10)
-	onef.write(text2art('MAIN', font='tarty8').encode())
+	onef.write(text2art('LIBS', font='tarty8').encode())
 	onef.write(b'\n'*10)
 
+
+	# --------------------------------------
+	# write libs, if any
+	# --------------------------------------
+	onef.write(get_libs())
 
 	# --------------------------------------
 	# write main code, if any
