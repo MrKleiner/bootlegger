@@ -377,7 +377,11 @@ class bootlegger:
 			css_buffer += '\n'.join(css)
 
 		compiled += (
-			'var pepegacssshite = document.createElement("div");'
+			'(function() {'
+			+
+			'var pepegacssshite = document.createElement("style");'
+			+
+			'pepegacssshite.id = "bootlegger_css";'
 			+
 			'pepegacssshite.textContent=window.bootlegger_sys_funcs.UTF8ArrToStr(new Uint8Array(['
 			+
@@ -386,6 +390,8 @@ class bootlegger:
 			']));'
 			+
 			'document.body.append(pepegacssshite);'
+			+
+			'})();'
 		)
 
 		return compiled
@@ -444,6 +450,14 @@ class bootlegger:
 
 
 		#
+		# sys funcs, needed for various shit
+		#
+		comp_file += '\n'*10
+		comp_file += (Path(__file__).parent / 'chunks' / 'btg_util.js').read_text(encoding='utf-8')
+		comp_file += '\n'*10
+
+
+		#
 		# CSS
 		#
 		comp_file += '\n'*10
@@ -452,15 +466,6 @@ class bootlegger:
 
 		comp_file += self.compile_css()
 
-
-
-
-		#
-		# sys funcs, needed for various shit
-		#
-		comp_file += '\n'*10
-		comp_file += (Path(__file__).parent / 'chunks' / 'btg_util.js').read_text(encoding='utf-8')
-		comp_file += '\n'*10
 
 
 		#
