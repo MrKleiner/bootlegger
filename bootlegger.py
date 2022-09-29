@@ -62,7 +62,7 @@ class bootlegger:
 		# basically, populate the local cfg with either provided or default
 		for cfg_entry in defauls:
 			# write default if parameter does not exist in the provided dict or is of the wrong type, else - use provided
-			self.cfg[cfg_entry] = defauls[cfg_entry] if (not isinstance(cfg_json.get(cfg_entry), defauls[cfg_entry][1]) or not cfg_json.get(cfg_entry)) else cfg_json.get(cfg_entry)
+			self.cfg[cfg_entry] = defauls[cfg_entry][0] if (not isinstance(cfg_json.get(cfg_entry), defauls[cfg_entry][1]) or not cfg_json.get(cfg_entry)) else cfg_json.get(cfg_entry)
 
 		# merge onefile params with default
 		if cfg_json.get('onefile'):
@@ -246,6 +246,7 @@ class bootlegger:
 			modules_buffer_css.append(self.css_mods[remaining_module])
 
 		self.processed_js = modules_buffer_js
+		self.processed_css = modules_buffer_css
 
 	# onefile
 	def process_libs(self):
@@ -255,6 +256,7 @@ class bootlegger:
 		libspath = self.cfg['onefile']['libs']
 		# only do it if libs are present
 		if not libspath:
+			print('No Libs To Process')
 			return
 
 		# proceed
@@ -271,11 +273,11 @@ class bootlegger:
 		# every library is named after its most parent folder
 		for chaos_lib in libspath.glob('*'):
 			# chaotic means that we simply get the first js file we find
-			unordered_libs[chaos_lib.name] = [l for l in libspath.rglob('*.js')][0].read_text(encoding='utf-8')
+			unordered_libs[chaos_lib.name] = [l for l in chaos_lib.rglob('*.js')][0].read_text(encoding='utf-8')
 
 
 		#
-		# First append ordered libss
+		# First append ordered libs
 		#
 
 		# Append ordered libs, delete them from unordered libs
@@ -329,7 +331,7 @@ class bootlegger:
 		self.processed_libs = ordered_libs
 
 
-
+	# onefile
 	def process_variable(self, vpath=''):
 		from pathlib import Path
 		import json
@@ -355,15 +357,38 @@ class bootlegger:
 				+
 				' = '
 				+
-				'window.bootlegger_sys_funcs.UTF8ArrToStr(new Uint8Array('
+				'window.bootlegger_sys_funcs.UTF8ArrToStr(new Uint8Array(['
 				+
-				json.dumps([b for b in vpath.read_bytes()]).replace(' ', '')
+				','.join([str(b) for b in vpath.read_bytes()])
 				+
-				'));'
+				']));'
 			)
 
 		return compiled_var
 
+
+	# onefile
+	def compile_css(self):
+		css_buffer = ''
+		compiled = ''
+
+		# collapse all in one string
+		for css in self.processed_css:
+			css_buffer += '\n'.join(css)
+
+		compiled += (
+			'var pepegacssshite = document.createElement("div");'
+			+
+			'pepegacssshite.textContent=window.bootlegger_sys_funcs.UTF8ArrToStr(new Uint8Array(['
+			+
+			','.join([str(b) for b in css_buffer.encode()])
+			+
+			']));'
+			+
+			'document.body.append(pepegacssshite);'
+		)
+
+		return compiled
 
 
 	# onefile
@@ -378,6 +403,7 @@ class bootlegger:
 		# and is either relative to the project dir or is absolute
 		# - Libraries
 		# - Fonts
+		# - Css
 		# - Variables
 		# - Main Code
 		# - Footer
@@ -416,6 +442,19 @@ class bootlegger:
 			comp_file += lib
 			comp_file += '\n'*10
 
+
+		#
+		# CSS
+		#
+		comp_file += '\n'*10
+		comp_file += self.commented_art('CSS', 'tarty8')
+		comp_file += '\n'*5
+
+		comp_file += self.compile_css()
+
+
+
+
 		#
 		# sys funcs, needed for various shit
 		#
@@ -431,22 +470,23 @@ class bootlegger:
 		# mark variables block
 		comp_file += '\n'*10
 		comp_file += self.commented_art('VARS', 'tarty8')
-		comp_file += '\n'*10
+		comp_file += '\n'*5
 
 		comp_file += 'const btg = {}'
-		comp_file += '\n'*10
+		comp_file += '\n'*5
 
 		vars_path = self.path_resolver(self.cfg['onefile']['variables'])
 		if vars_path:
 			for var in vars_path.glob('*'):
 				comp_file += self.process_variable(var)
-				comp_file += '\n'*5
+				comp_file += '\n'*3
 
 		#
 		# Code
 		#
 
 		# mark codes block
+		comp_file += '\n'*15
 		comp_file += self.commented_art('CODE', 'tarty8')
 		comp_file += '\n'*10
 
@@ -464,14 +504,24 @@ class bootlegger:
 
 
 
+	def exec_onefile(self):
+		self.compile_folders()
+		self.reorder_modules()
+		self.process_libs()
+
+		onefile_path = self.path_resolver(self.cfg['onefile']['output_to']) or self.cfg['jsmodules'].parent
+
+		(onefile_path / f"""{self.cfg['sys_name']}.pwned.js""").write_bytes(self.compile_singlefile().encode())
+
+
 
 def mdma():
-	from pathlib import Path
 	ded = bootlegger()
 	ded.compile_folders()
 	ded.reorder_modules()
 	ded.process_libs()
-	Path('test_sex.js').write_bytes(ded.compile_singlefile().encode())
+	ded.exec_onefile()
+	# Path('test_sex.js').write_bytes(ded.)
 
 
 mdma()
