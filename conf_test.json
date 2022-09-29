@@ -27,7 +27,7 @@
 	// the specified modules are put in order and then unspecified modules are added
 	// if module does not exist - ignore
 	// only counts if points to a valid destination. Otherwise - ignore.
-	"modules_explicit": [
+	"modules_order": [
 		"msg_lexer_ppg",
 		"chat_system"
 	],
@@ -60,15 +60,15 @@
 
 		// path to the file to use as the header of the entire file
 		// only counts if points to a valid file. Otherwise - ignore.
-		"header_pre": "pep_header.js",
+		"file_header": "pep_header.js",
 
 		// path to the file to use as the header AFTER vars declaration and library links
 		// only counts if points to a valid file. Otherwise - ignore.
-		"header": false,
+		"code_header": false,
 
 		// put the contents of this file in the very bottom of the resulting file
 		// only counts if points to a valid file. Otherwise - ignore.
-		"footer": false,
+		"file_footer": false,
 
 		// whether to sign libraries with their folder names or not
 		"sign_libs": true,
@@ -86,9 +86,9 @@
 		
 		// the root of the subpath will be used as the library name
 		// ignored if invalid
-		"libs_explicit": [
-			"dexie/3_0_3/dexie_3_0_3.min.js",
-			"jszip/dexie_3_0_3.min.js"
+		"libs_order": [
+			// "dexie/3_0_3/dexie_3_0_3.min.js",
+			"jszip/jszip.min.js"
 		],
 
 
@@ -120,7 +120,7 @@
 		// should point to a folder where each file:
 		// location.location.varname.text/bytes/json.decorator(any extension)
 		// location is relative to const btg = {}
-		"variables": ""
+		"variables": "vars"
 	}
 }
 
