@@ -8,7 +8,7 @@ for (var font of fnt_pool)
 	font-family: '${font.family}';
 	font-weight: ${font.weight};
 	font-style: ${font.ftype};
-	src: url('${(window.URL || window.webkitURL).createObjectURL(new Blob([new Uint8Array(font.bt)]))}');
+	src: url('${(window.URL || window.webkitURL).createObjectURL(new Blob([window.bootlegger_sys_funcs.base64DecToArr(font.bt)]))}');
 }
 		`.trim());
 }

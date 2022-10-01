@@ -256,8 +256,8 @@ class bootlegger:
 				cfont['family'] = fnt.name
 				cfont['weight'] = fnt_file.name.split('.')[0]
 				cfont['ftype'] = fnt_file.name.split('.')[1]
-				cfont['bt'] = [b for b in fnt_file.read_bytes()]
-				# cfont['bt'] = base64.b64encode(fnt_file.read_bytes())
+				# cfont['bt'] = [b for b in fnt_file.read_bytes()]
+				cfont['bt'] = base64.b64encode(fnt_file.read_bytes()).decode()
 
 				fonts_dict.append(cfont)
 
