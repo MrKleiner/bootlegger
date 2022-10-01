@@ -226,7 +226,43 @@ class bootlegger:
 					self.css_mods[mod.basename].append(evaluated)
 
 
-	# onefile
+
+	#
+	# Onefile
+	#
+
+	def compile_fonts(self):
+		import json
+		from pathlib import Path
+		import base64
+		# strict folder struct:
+		# every folder is a font name
+		# every file name inside that folder is:
+		# font_type(aka regular/italic).font_weight(aka 300)
+		fonts_path = self.path_resolver(self.cfg['onefile']['bin_fonts'])
+		if not fonts_path:
+			return
+
+		fonts_dict = []
+		for fnt in fonts_path.glob('*'):
+			if not fnt.is_dir():
+				continue
+
+			for fnt_file in fnt.glob('*'):
+				if not fnt_file.is_file():
+					continue
+
+				cfont = {}
+				cfont['family'] = fnt.name
+				cfont['weight'] = fnt_file.name.split('.')[0]
+				cfont['ftype'] = fnt_file.name.split('.')[1]
+				cfont['bt'] = [b for b in fnt_file.read_bytes()]
+				# cfont['bt'] = base64.b64encode(fnt_file.read_bytes())
+
+				fonts_dict.append(cfont)
+
+		return json.dumps(fonts_dict)
+
 	def reorder_modules(self):
 		# store ordered modules here
 		modules_buffer_js = []
@@ -248,7 +284,6 @@ class bootlegger:
 		self.processed_js = modules_buffer_js
 		self.processed_css = modules_buffer_css
 
-	# onefile
 	def process_libs(self):
 		from pathlib import Path
 		# from art import text2art
@@ -330,8 +365,6 @@ class bootlegger:
 		# save processed libs
 		self.processed_libs = ordered_libs
 
-
-	# onefile
 	def process_variable(self, vpath=''):
 		from pathlib import Path
 		import json
@@ -342,32 +375,45 @@ class bootlegger:
 		compiled_var = ''		
 
 		var_cfg_raw = varpath.name.split('.')
+		# (delete decorative extension)
 		del var_cfg_raw[-1]
 
 		var_type = var_cfg_raw[-1].lower()
+		# (delete var type)
 		del var_cfg_raw[-1]
 
-		var_loc = '.'.join(var_cfg_raw).lower()
+		var_loc = '.'.join(var_cfg_raw).lower().strip('.')
 
+		# just do this right away
+		# for now everything uses this anyway...
+		unit_array = f"""new Uint8Array([{','.join([str(b) for b in vpath.read_bytes()])}])"""
+
+		# ensure that the variable location exists
+		dest = ''
+		deep_path = []
+		del var_cfg_raw[-1]
+		for dst in var_cfg_raw:
+			# important todo: the replace() is an extremely retarded hack to get rid of double dots
+			# double dots happen when there's still no deep path
+			dest += f"""if(!btg.{'.'.join(deep_path)}.{dst}){{btg.{'.'.join(deep_path)}.{dst} = {{}}}};""".replace('..', '.')
+			deep_path.append(dst)
+		#
+		# evaluate variable by type
+		#
 		if var_type == 'text':
-			compiled_var = (
-				'btg.'
-				+
-				var_loc.strip('.')
-				+
-				' = '
-				+
-				'window.bootlegger_sys_funcs.UTF8ArrToStr(new Uint8Array(['
-				+
-				','.join([str(b) for b in vpath.read_bytes()])
-				+
-				']));'
-			)
+			compiled_var = f"""btg.{var_loc} = window.bootlegger_sys_funcs.UTF8ArrToStr({unit_array});"""
 
-		return compiled_var
+		if var_type == 'bytes_raw':
+			compiled_var = f"""btg.{var_loc} = {unit_array};"""
 
+		if var_type == 'bytes':
+			compiled_var = f"""btg.{var_loc} = {{'bytes': {unit_array}, 'url': (window.URL || window.webkitURL).createObjectURL(new Blob([({unit_array})]))}}"""
 
-	# onefile
+		if var_type == 'json':
+			compiled_var = f"""btg.{var_loc} = JSON.parse(window.bootlegger_sys_funcs.UTF8ArrToStr({unit_array}));"""
+
+		return dest + compiled_var
+
 	def compile_css(self):
 		css_buffer = ''
 		compiled = ''
@@ -396,8 +442,6 @@ class bootlegger:
 
 		return compiled
 
-
-	# onefile
 	def compile_singlefile(self):
 		from pathlib import Path
 		# from art import text2art
@@ -458,6 +502,24 @@ class bootlegger:
 
 
 		#
+		# Fonts
+		#
+		comp_file += '\n'*10
+		comp_file += self.commented_art('FONTS', 'tarty8')
+		comp_file += '\n'*5
+
+		# open func
+		comp_file += '(function() {'
+		comp_file += '\n'*2
+		# define dict
+		comp_file += f'var fnt_pool = {self.compile_fonts()}'
+		comp_file += (Path(__file__).parent / 'chunks' / 'btg_fonts.js').read_text()
+		# close func
+		comp_file += '\n'*2
+		comp_file += '})();'
+
+
+		#
 		# CSS
 		#
 		comp_file += '\n'*10
@@ -478,6 +540,8 @@ class bootlegger:
 		comp_file += '\n'*5
 
 		comp_file += 'const btg = {}'
+		comp_file += '\n'*2
+		comp_file += 'window.bootlegger = {}'
 		comp_file += '\n'*5
 
 		vars_path = self.path_resolver(self.cfg['onefile']['variables'])

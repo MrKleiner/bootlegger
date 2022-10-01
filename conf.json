@@ -102,9 +102,18 @@
 
 		// only counts if present, not false, not empty and not null
 		// should point to a folder where each file:
-		// location.location.varname.text/bytes/json.decorator(any extension)
+		// location.location.varname.text/bytes/bytes_raw/json.decorator(any extension)
 		// location is relative to const btg = {}
-		"variables": ""
+		"variables": "",
+
+
+		// compile binary fonts
+		// strict folder struct:
+		// this should point to a folder containing subfolders:
+		// every folder is a font name
+		// every file name inside that folder is:
+		// font_type(aka regular/italic).font_weight(aka 300)
+		"fonts": ""
 	}
 }
 
