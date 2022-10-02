@@ -21,6 +21,8 @@ class bootlegger:
 		self.processed_js = []
 		self.processed_css = []
 
+		self.chunks = Path(__file__).parent / 'chunks'
+
 
 		try:
 			read_cfg = Path(sys.argv[1]).read_text().split('\n')
@@ -39,7 +41,8 @@ class bootlegger:
 			'writename': (None, str),
 			'writesuffix': (None, str),
 			'onlyfile': (False, bool),
-			'onefile': ({}, dict)
+			'onefile': ({}, dict),
+			'art': (True, bool)
 		}
 
 		defaults_onlyfile = {
@@ -62,12 +65,12 @@ class bootlegger:
 		# basically, populate the local cfg with either provided or default
 		for cfg_entry in defauls:
 			# write default if parameter does not exist in the provided dict or is of the wrong type, else - use provided
-			self.cfg[cfg_entry] = defauls[cfg_entry][0] if (not isinstance(cfg_json.get(cfg_entry), defauls[cfg_entry][1]) or not cfg_json.get(cfg_entry)) else cfg_json.get(cfg_entry)
+			self.cfg[cfg_entry] = defauls[cfg_entry][0] if (not isinstance(cfg_json.get(cfg_entry), defauls[cfg_entry][1])) else cfg_json.get(cfg_entry)
 
 		# merge onefile params with default
 		if cfg_json.get('onefile'):
 			for cfg_onef in defaults_onlyfile:
-				self.cfg['onefile'][cfg_onef] = defaults_onlyfile[cfg_onef][0] if (not isinstance(cfg_json['onefile'].get(cfg_onef), defaults_onlyfile[cfg_onef][1]) or not cfg_json['onefile'].get(cfg_onef)) else cfg_json['onefile'].get(cfg_onef)
+				self.cfg['onefile'][cfg_onef] = defaults_onlyfile[cfg_onef][0] if (not isinstance(cfg_json['onefile'].get(cfg_onef), defaults_onlyfile[cfg_onef][1])) else cfg_json['onefile'].get(cfg_onef)
 		else:
 			self.cfg['onefile'] = False
 
@@ -94,7 +97,7 @@ class bootlegger:
 
 	def path_resolver(self, query=None, tp='dir'):
 		from pathlib import Path
-		if query == None:
+		if query == None or query == '':
 			return
 
 		qry = Path(str(query))
@@ -125,10 +128,18 @@ class bootlegger:
 
 	def commented_art(self, txt='sex', fnt='alligrator'):
 		from art import text2art
-		text = text2art(txt, font=fnt)
+		text = text2art(txt, font=fnt) if (self.cfg['art'] == True) else txt
 		return '\n'.join([('// ' + ln) for ln in text.split('\n')])
 
-
+	def wrap_autofunc(self, txt='', tabs=1):
+		wrapped = ''
+		wrapped += '(function() {'
+		wrapped += '\n'
+		# add tabs
+		wrapped += '\n'.join([('\t'*tabs + ln) for ln in txt.split('\n')])
+		wrapped += '\n'
+		wrapped += '})();'
+		return wrapped
 
 
 	def compile_folders(self):
@@ -286,6 +297,7 @@ class bootlegger:
 
 	def process_libs(self):
 		from pathlib import Path
+		import requests
 		# from art import text2art
 
 		libspath = self.cfg['onefile']['libs']
@@ -362,6 +374,32 @@ class bootlegger:
 				unordered_libs[remaining_lib]
 			)
 
+
+		#
+		# Finally, append urls
+		#
+		for remote in self.cfg['onefile']['add_libs']:
+			if remote['type'] == 'url':
+
+				# headers
+				rq_headers = {
+					# 'acce'
+				}
+
+				get_lib = requests.get(url=remote['src'], headers=rq_headers, params=None)
+
+				ordered_libs.append(
+					# sign
+					self.commented_art(remote['name'], 'alligator')
+					+
+					# a few line breaks
+					'\n'*3
+					+
+					# the library itself
+					get_lib.text
+				)
+
+
 		# save processed libs
 		self.processed_libs = ordered_libs
 
@@ -415,32 +453,24 @@ class bootlegger:
 		return dest + compiled_var
 
 	def compile_css(self):
+		import base64
+		from pathlib import Path
 		css_buffer = ''
 		compiled = ''
 
 		# collapse all in one string
+		# (every entry is an array of texts from files)
 		for css in self.processed_css:
 			css_buffer += '\n'.join(css)
 
-		compiled += (
-			'(function() {'
-			+
-			'var pepegacssshite = document.createElement("style");'
-			+
-			'pepegacssshite.id = "bootlegger_css";'
-			+
-			'pepegacssshite.textContent=window.bootlegger_sys_funcs.UTF8ArrToStr(new Uint8Array(['
-			+
-			','.join([str(b) for b in css_buffer.encode()])
-			+
-			']));'
-			+
-			'document.body.append(pepegacssshite);'
-			+
-			'})();'
-		)
+		compiled += f'var cssb64 = `{base64.b64encode(css_buffer.encode()).decode()}`;'
+		compiled += '\n'
+		compiled += (self.chunks / 'css.js').read_text().strip()
 
-		return compiled
+		return self.wrap_autofunc(compiled)
+
+
+
 
 	def compile_singlefile(self):
 		from pathlib import Path
@@ -497,7 +527,7 @@ class bootlegger:
 		# sys funcs, needed for various shit
 		#
 		comp_file += '\n'*10
-		comp_file += (Path(__file__).parent / 'chunks' / 'btg_util.js').read_text(encoding='utf-8')
+		comp_file += (self.chunks / 'btg_util.js').read_text(encoding='utf-8')
 		comp_file += '\n'*10
 
 
@@ -508,15 +538,14 @@ class bootlegger:
 		comp_file += self.commented_art('FONTS', 'tarty8')
 		comp_file += '\n'*5
 
-		# open func
-		comp_file += '(function() {'
-		comp_file += '\n'*2
-		# define dict
-		comp_file += f'var fnt_pool = {self.compile_fonts()}'
-		comp_file += (Path(__file__).parent / 'chunks' / 'btg_fonts.js').read_text()
-		# close func
-		comp_file += '\n'*2
-		comp_file += '})();'
+		self.wrap_autofunc((
+			f'var fnt_pool = {self.compile_fonts()}'
+			+
+			'\n'
+			+
+			(self.chunks / 'btg_fonts.js').read_text().strip()
+		))
+
 
 
 		#
@@ -539,14 +568,14 @@ class bootlegger:
 		comp_file += self.commented_art('VARS', 'tarty8')
 		comp_file += '\n'*5
 
-		comp_file += 'const btg = {}'
+		comp_file += 'const btg = {};'
 		comp_file += '\n'*2
-		comp_file += 'window.bootlegger = {}'
+		comp_file += 'window.bootlegger = {};'
 		comp_file += '\n'*5
 
 		vars_path = self.path_resolver(self.cfg['onefile']['variables'])
 		if vars_path:
-			for var in vars_path.glob('*'):
+			for var in vars_path.rglob('*'):
 				comp_file += self.process_variable(var)
 				comp_file += '\n'*3
 

@@ -69,6 +69,10 @@
 		// whether to sign libraries with their folder names or not
 		"sign_libs": true,
 
+		// whether to include beautiful ascii shite or not
+		// default to True
+		"art": true,
+
 		// folder containing folders with libraries to include in the file
 		// only counts if present, not false, not empty and not null
 		"libs": "",
@@ -88,7 +92,14 @@
 		// only counts if present, not false, not empty and not null
 		// manually add libraries
 		// (lame shit)
-		"add_libs": [],
+		// only useful when adding libs from online
+		"add_libs": [
+			{
+				"type": "url",
+				"src": "https://cdn.jsdelivr.net/gh/MrKleiner/liz3_toybox_webtools@latest/sex_toys/shared/toolbox.min.js",
+				"name": "lizard"
+			}
+		],
 
 
 		// only counts if present, not false, not empty and not null
