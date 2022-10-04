@@ -37,6 +37,14 @@
 	// auto = use original modules folder name
 	"writename": "auto",
 
+	// 0: dont do anything
+	// 1: collapse lines which start with //
+	// 2: collapse empty lines
+	// 3: comments and empty lines
+
+	// this does not account for strings or anything
+	"collapse": 3,
+
 	// This is ignored if writename is specified
 	// If writename is not specified then this suffix is added 
 	// to the name of the folder cotaining compiled modules

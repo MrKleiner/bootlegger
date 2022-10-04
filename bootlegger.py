@@ -42,7 +42,8 @@ class bootlegger:
 			'writesuffix': (None, str),
 			'onlyfile': (False, bool),
 			'onefile': ({}, dict),
-			'art': (True, bool)
+			'art': (True, bool),
+			'collapse': (0, int)
 		}
 
 		defaults_onlyfile = {
@@ -220,18 +221,36 @@ class bootlegger:
 					.replace(self.storage_def, f'window.{self.btg_sys_name_storage}')
 				)
 
-				# The module has to be declared before we can add stuff to it...
-				# It's possible to create a file defining all these modules, but it'd be required to manually link it
-				# it's not a peoblem when it's a single file, becuase all we have to do is simply declare this somewhere in the top.
-				# But when it's a proper multi-file system - it either has to be a separate file declaring all this stuff
-				# or simply try to add this in the very beginning of every module file IF NEEDED
-				if mfile.suffix.lower() == '.js':
-					evaluated = f'if (!window.bootlegger.{current_mod_name}){{window.bootlegger.{current_mod_name}={{}}}}' + '\n' + evaluated
-
 
 				# now append it to the pool
 				# (for singlefile thingy)
 				if mfile.suffix.lower() == '.js':
+					# collapsed = evaluated
+					process = evaluated.split('\n')
+					# sex = evaluated
+
+					if self.cfg['collapse'] == 1:
+						evaluated = '\n'.join([ln for ln in process if not ln.strip().startswith('//')])
+
+					if self.cfg['collapse'] == 2:
+						evaluated = '\n'.join([ln for ln in process if not (ln.strip() == '')])
+
+					if self.cfg['collapse'] == 3:
+						import re
+						print('collapsing', mod.basename)
+						evaluated = '\n'.join([ln for ln in process if not (ln.strip() == '' or ln.strip().startswith('//'))])
+						# evaluated = re.sub(r'([^\(\.]\/\*[^\(]*)\*\/', '', evaluated, re.M)
+						evaluated = re.sub(r'\/\*.*?\*\/', '', evaluated, flags=re.DOTALL)
+
+
+					# The module has to be declared before we can add stuff to it...
+					# It's possible to create a file defining all these modules, but it'd be required to manually link it
+					# it's not a peoblem when it's a single file, becuase all we have to do is simply declare this somewhere in the top.
+					# But when it's a proper multi-file system - it either has to be a separate file declaring all this stuff
+					# or simply try to add this in the very beginning of every module file IF NEEDED
+					evaluated = '\n' + f'if (!window.bootlegger.{current_mod_name}){{window.bootlegger.{current_mod_name}={{}}}};' + '\n' + evaluated
+					
+					# write down the evaluated result
 					self.js_mods[mod.basename].append(evaluated)
 				if mfile.suffix.lower() == '.css':
 					self.css_mods[mod.basename].append(evaluated)
@@ -405,7 +424,7 @@ class bootlegger:
 
 	def process_variable(self, vpath=''):
 		from pathlib import Path
-		import json
+		import json, base64
 		varpath = Path(vpath)
 		if not varpath.is_file():
 			return ''
@@ -424,7 +443,8 @@ class bootlegger:
 
 		# just do this right away
 		# for now everything uses this anyway...
-		unit_array = f"""new Uint8Array([{','.join([str(b) for b in vpath.read_bytes()])}])"""
+		# unit_array = f"""new Uint8Array([{','.join([str(b) for b in vpath.read_bytes()])}])"""
+		unit_array = f"""window.bootlegger_sys_funcs.base64DecToArr('{base64.b64encode(vpath.read_bytes()).decode()}')"""
 
 		# ensure that the variable location exists
 		dest = ''
@@ -590,6 +610,9 @@ class bootlegger:
 
 		# comp_file += ('\n'*10).join(self.processed_js)
 		for code in self.processed_js:
+			# cd = ('\n'*3).join(code)
+			# if self.cfg['collapse'] == 1:
+			# 	cd = ('\n'*3).join(code)
 			comp_file += ('\n'*5).join(code)
 
 
