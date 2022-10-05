@@ -21,6 +21,8 @@ class bootlegger:
 		self.processed_js = []
 		self.processed_css = []
 
+		self.reordered_modules = []
+
 		self.chunks = Path(__file__).parent / 'chunks'
 
 
@@ -365,6 +367,88 @@ class bootlegger:
 		# delete the zip payload
 		pl_path.unlink(missing_ok=True)
 
+	def compile_binds(self):
+		from pathlib import Path
+		import json
+
+		# collect binds from every module
+		module_events = {}
+		# for every js module in the jsmodules folder...
+		for md in self.reordered_modules:
+			# go through every json with binds
+			for md_binds_file in (self.cfg['jsmodules'] / md).glob('*.binds.json'):
+				# evaluate binds json
+				binds_json = json.loads(md_binds_file.read_bytes())
+				# go through every event
+				for evt in binds_json:
+					# create the current event binds pool in the global pool if doesn't exist
+					if module_events.get(evt) == None:
+						module_events[evt] = {}
+
+					# ???
+					display_name = f"""{md_binds_file.parent.name} {md_binds_file.basename}"""
+
+					# create the events pool
+					module_events[evt][display_name] = [bnd for bnd in binds_json[evt]]
+
+		# collapse everything into actual code
+		compiled_events = ''
+
+		# for every event type
+		for etype in module_events:
+			# open the event type
+			compiled_events += f"""document.addEventListener('{etype}', tr_event => {{"""
+
+			# for every module
+			for module_binds in module_events[etype]:
+				# mark the module
+				compiled_events += '\n'*3
+				compiled_events += '\t// =========================================='
+				compiled_events += '\n'
+				compiled_events += '\t// \t' + module_binds
+				compiled_events += '\n'
+				compiled_events += '\t// =========================================='
+				compiled_events += '\n'*1
+
+				# add actual binds
+				for c_action in module_events[etype][module_binds]:
+					# evaluate the function parameters
+					functionparams = ', '.join(list(filter(None, [
+						# event goes first
+						'tr_event' if c_action['pass_event'] == True else '',
+						# then element
+						f"""event.target.closest('{c_action.get('selector')}')""" if c_action.get('pass_element') == True else '',
+						# then params
+						c_action.get('pass_params') if c_action.get('pass_params') != None and c_action.get('pass_params').strip() != '' else ''
+					])))
+
+					compiled_events += '\n'
+					compiled_events += '\t'
+
+					# also evaluate functions
+					evaluated_function = (
+						c_action['function']
+						.replace(self.this_mod_def, f'window.{self.btg_sys_name}.{current_mod_name}')
+						.replace(self.whole_sys_def, f'window.{self.btg_sys_name}')
+						.replace(self.storage_def, f'window.{self.btg_sys_name_storage}')
+					)
+
+					compiled_events += f"""if (event.target.closest('{c_action['selector']}'))"""
+					compiled_events += f"""{{{evaluated_function}({functionparams})}}"""
+
+					compiled_events += ('else{ ' + c_action.get('else') + '(' + functionparams + ') }') if c_action.get('else') != None else ''
+					compiled_events += f"""else{{{c_action.get('else')}({functionparams})}}""" if c_action.get('else') != None else ''
+
+				compiled_events += '\n'*2
+
+			compiled_events += '\n'
+			compiled_events += """});"""
+			compiled_events += '\n'*3
+
+
+		# save the compiled result
+		(self.cfg['jsmodules'].parent / 'binds_sex.js').write_bytes(compiled_events.encode())
+
 
 
 	#
@@ -415,11 +499,13 @@ class bootlegger:
 			modules_buffer_css.append(self.css_mods[module])
 			del self.js_mods[module]
 			del self.css_mods[module]
+			self.reordered_modules.append(module)
 
 		# then appened remaining ones
 		for remaining_module in self.js_mods:
 			modules_buffer_js.append(self.js_mods[remaining_module])
 			modules_buffer_css.append(self.css_mods[remaining_module])
+			self.reordered_modules.append(remaining_module)
 
 		self.processed_js = modules_buffer_js
 		self.processed_css = modules_buffer_css
@@ -752,7 +838,9 @@ def mdma():
 	ded.reorder_modules()
 	ded.process_libs()
 	ded.exec_onefile()
+	ded.compile_binds()
 	ded.syncer()
+	
 	# Path('test_sex.js').write_bytes(ded.)
 
 
