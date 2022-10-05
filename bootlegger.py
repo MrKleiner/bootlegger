@@ -43,7 +43,16 @@ class bootlegger:
 			'onlyfile': (False, bool),
 			'onefile': ({}, dict),
 			'art': (True, bool),
-			'collapse': (0, int)
+			'collapse': (0, int),
+			'sync': (False, dict)
+		}
+
+		defauls_sync = {
+			'dest': (None, str),
+			'loc': (None, str),
+			'auth': (None, str),
+			'sync_mods': (True, bool),
+			'folders': ([], list)
 		}
 
 		defaults_onlyfile = {
@@ -74,6 +83,13 @@ class bootlegger:
 				self.cfg['onefile'][cfg_onef] = defaults_onlyfile[cfg_onef][0] if (not isinstance(cfg_json['onefile'].get(cfg_onef), defaults_onlyfile[cfg_onef][1])) else cfg_json['onefile'].get(cfg_onef)
 		else:
 			self.cfg['onefile'] = False
+
+
+		# merge sync params with default
+		for cfg_sync in defauls_sync:
+			self.cfg['sync'][cfg_sync] = defauls_sync[cfg_sync][0] if (not isinstance(cfg_json['sync'].get(cfg_sync), defauls_sync[cfg_sync][1])) else cfg_json['sync'].get(cfg_sync)
+
+
 
 
 		#
@@ -115,6 +131,10 @@ class bootlegger:
 			else:
 				resolved = None
 		else:
+			# else - test for file
+			# important todo: this is not the intended functionality
+			# the tp param explicitly specifies whether to test for file or dir
+
 			# if specified path exists as an absolute path
 			# then use it right away
 			if qry.is_file():
@@ -146,14 +166,19 @@ class bootlegger:
 	def compile_folders(self):
 		import shutil
 		from pathlib import Path
+
+
 		#
-		# evaluate naming scheme
+		# evaluate and store naming scheme
 		#
 
 		modules_pool = self.cfg['jsmodules']
 
+		cfg = self.cfg
+
 		# this is not needed if onlyfile is true...
 		# determine where to put compiled modules
+		# this will also create the root folder to put compiled modules to
 		if not self.cfg['onlyfile']:
 			# by default it's the parent folder of the modules folder
 			compiled_folder_name = modules_pool.name
@@ -163,6 +188,7 @@ class bootlegger:
 			if cfg.get('writename') and str(cfg.get('writename')).lower() != 'auto':
 				compiled_folder_name = cfg['writename']
 
+			# by default the folder suffix is _c
 			compiled_folder_suffix = '_c'
 			# If suffix is present, not auto and writename is not specified OR is auto
 			# then use what was specified
@@ -170,11 +196,14 @@ class bootlegger:
 			if cfg.get('writesuffix') and str(cfg.get('writesuffix')).lower() != 'auto' and (not cfg.get('writename') or cfg.get('writename') == 'auto'):
 				compiled_folder_suffix = cfg['writesuffix']
 
-			# final result
+			# save evaluated folder suffix
+			self.fl_suffix = compiled_folder_suffix
+
+			# final result (compiled folders write name)
 			compiled_folder_name += compiled_folder_suffix
 			comp_folder_path = modules_pool.parent / compiled_folder_name
 
-			# be very careful: return if SOMEHOW the compiled folder path matches the src folder path...
+			# be very careful: abort if SOMEHOW the compiled folder path matches the src folder path...
 			if str(comp_folder_path) == str(modules_pool):
 				print('Fatal Error: Compiled folder name matches source folder name')
 				return
@@ -188,6 +217,7 @@ class bootlegger:
 			# now create this folder again
 			comp_folder_path.mkdir(exist_ok=True)
 
+			self.output_modules_folder = comp_folder_path
 
 		# get a list of folders inside the modules folder
 		# aka get the list of modules
@@ -221,6 +251,9 @@ class bootlegger:
 					.replace(self.storage_def, f'window.{self.btg_sys_name_storage}')
 				)
 
+				# Write the evaulated result to the compiled modules pool, if not onlyfile
+				if not self.cfg['onlyfile']:
+					(comp_folder_path / current_mod_name / mfile.name).write_bytes(evaluated.encode())
 
 				# now append it to the pool
 				# (for singlefile thingy)
@@ -254,6 +287,79 @@ class bootlegger:
 					self.js_mods[mod.basename].append(evaluated)
 				if mfile.suffix.lower() == '.css':
 					self.css_mods[mod.basename].append(evaluated)
+
+
+	def syncer(self):
+		# minimal requirements
+		if not self.cfg['sync']['dest'] or not self.cfg['sync']['loc'] or not self.cfg['sync']['auth']:
+			print('Malformed sync config')
+			return
+
+		import requests, base64
+		from zipfile import ZipFile
+		from pathlib import Path
+
+		# the system doesnt bother (for now)
+		# it collects everything and then overrides everything
+		# for now the system does not provide any extra support for large files
+		# it's assumed that the entire sync payload is around 10mb in size
+		# everything is zipped into a zip archive and sent to a remote destination
+
+		# todo: random internet article suggests to collect all the files beforehand...
+		# but it doesn't really matter...
+
+		# todo: this looks too bootleg even for bootlegger
+
+		# collect all files to be zipped
+		zp_paths = [self.path_resolver(p) for p in self.cfg['sync']['payload']]
+		# remove invalid entries
+		zp_paths = [valid for valid in zp_paths if valid != None]
+
+		# files in the archive have to be relative to the working dir
+		# todo: it'd actually be safer to get the parent dir of the jsmodules right away
+		rel_path = self.cfg['project'] or self.cfg['jsmodules'].parent
+
+		# first of all - rglob modules
+		for md in self.output_modules_folder.rglob('*'):
+			zp_paths.append(md)
+
+		# now rglob additional folders
+		for rg_idx, rg in enumerate(zp_paths):
+			if rg.is_dir():
+				# remove the folder entry itself
+				del zp_paths[rg_idx]
+
+				# append rglobbed results
+				for gl in rg.rglob('*'):
+					zp_paths.append(gl)
+
+		# generate and write zip file
+		# the write destination is always the containing folder of the jsmodules
+		pl_path = self.cfg['jsmodules'].parent / 'sync_payload.zip'
+		with ZipFile(str(pl_path), 'w') as zip:
+			for file in zp_paths:
+				zip.write(file)
+
+		# send zip file to the remote destination
+		# headers
+		rq_headers = {
+
+		}
+
+		prms = {
+			'dest': base64.b64encode(self.cfg['sync']['loc'].encode()).decode(),
+			'auth': self.cfg['sync']['auth']
+		}
+
+		send_payload = requests.post(
+			url=f"""{self.cfg['sync']['dest']}/htbin/sync.py""",
+			headers=rq_headers,
+			params=prms,
+			data=pl_path.read_bytes()
+		)
+
+		# delete the zip payload
+		pl_path.unlink(missing_ok=True)
 
 
 
@@ -642,6 +748,7 @@ def mdma():
 	ded.reorder_modules()
 	ded.process_libs()
 	ded.exec_onefile()
+	ded.syncer()
 	# Path('test_sex.js').write_bytes(ded.)
 
 
