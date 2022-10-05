@@ -290,6 +290,8 @@ class bootlegger:
 
 
 	def syncer(self):
+		# todo: MAYBE add md5 hash validation
+
 		# minimal requirements
 		if not self.cfg['sync']['dest'] or not self.cfg['sync']['loc'] or not self.cfg['sync']['auth']:
 			print('Malformed sync config')
@@ -311,9 +313,11 @@ class bootlegger:
 		# todo: this looks too bootleg even for bootlegger
 
 		# collect all files to be zipped
-		zp_paths = [self.path_resolver(p) for p in self.cfg['sync']['payload']]
+		zp_paths = [(self.path_resolver(p, 'dir') or self.path_resolver(p, 'file')) for p in self.cfg['sync']['payload']]
 		# remove invalid entries
 		zp_paths = [valid for valid in zp_paths if valid != None]
+
+		print(zp_paths)
 
 		# files in the archive have to be relative to the working dir
 		# todo: it'd actually be safer to get the parent dir of the jsmodules right away

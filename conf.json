@@ -133,6 +133,33 @@
 		// every file name inside that folder is:
 		// font_type(aka regular/italic).font_weight(aka 300)
 		"fonts": ""
+	},
+
+	// it's possible to sync the processed stuff with a remote destination
+	// bootlegger server has to be running on the other side
+	// coming soon: raw TCP sync for better performance
+	"sync": {
+		// full address including http or whatever
+		"dest": "http://192.168.1.118:7666",
+
+		// location on remote destination where to put all the synced files
+		// has to be an absolute and existing path
+		"loc": "C:/custom/btg_dest_test",
+
+		// password
+		"auth": "demomesa",
+
+		// whether to sync precessed modules or not
+		// default to true
+		"sync_mods": true,
+
+		// additional folders/files to sync
+		"payload":[
+			"libs",
+			"beauty",
+			"vars",
+			"pepega.pwned.js"
+		]
 	}
 }
 
