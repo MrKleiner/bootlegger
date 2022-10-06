@@ -146,6 +146,9 @@
 		// has to be an absolute and existing path
 		"loc": "C:/custom/btg_dest_test",
 
+		// path to a json containing access passwords
+		"authdb": "",
+
 		// password
 		"auth": "demomesa",
 

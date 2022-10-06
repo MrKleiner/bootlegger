@@ -1,0 +1,8 @@
+{
+	// sync requires auth
+	// this is a password...
+	// Come up with smth stronger than qwerty123, ya whizzle
+	// I'm not kidding: dedicated cybersecurity students often scan IP ranges
+	// for open ports and see what kind of trouble they can cause on your server
+	"sync_pswd": "bagpipes"
+}

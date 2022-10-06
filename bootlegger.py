@@ -23,6 +23,8 @@ class bootlegger:
 
 		self.reordered_modules = []
 
+		self.evbinds = ''
+
 		self.chunks = Path(__file__).parent / 'chunks'
 
 
@@ -164,6 +166,11 @@ class bootlegger:
 		wrapped += '})();'
 		return wrapped
 
+	def basename(self, pthlib=None):
+		if not pthlib:
+			return ''
+		return pthlib.name.split('.')[0] 
+
 
 	def compile_folders(self):
 		import shutil
@@ -228,7 +235,7 @@ class bootlegger:
 
 		# for every module
 		for mod in flds:
-			current_mod_name = mod.basename
+			current_mod_name = self.basename(mod)
 			print('Processing module', current_mod_name)
 
 			# define this module in the global js modules dict
@@ -272,7 +279,7 @@ class bootlegger:
 
 					if self.cfg['collapse'] == 3:
 						import re
-						print('collapsing', mod.basename)
+						print('collapsing', self.basename(mod))
 						evaluated = '\n'.join([ln for ln in process if not (ln.strip() == '' or ln.strip().startswith('//'))])
 						# evaluated = re.sub(r'([^\(\.]\/\*[^\(]*)\*\/', '', evaluated, re.M)
 						evaluated = re.sub(r'\/\*.*?\*\/', '', evaluated, flags=re.DOTALL)
@@ -286,9 +293,9 @@ class bootlegger:
 					evaluated = '\n' + f'if (!window.bootlegger.{current_mod_name}){{window.bootlegger.{current_mod_name}={{}}}};' + '\n' + evaluated
 					
 					# write down the evaluated result
-					self.js_mods[mod.basename].append(evaluated)
+					self.js_mods[self.basename(mod)].append(evaluated)
 				if mfile.suffix.lower() == '.css':
-					self.css_mods[mod.basename].append(evaluated)
+					self.css_mods[self.basename(mod)].append(evaluated)
 
 
 	def syncer(self):
@@ -354,7 +361,8 @@ class bootlegger:
 
 		prms = {
 			'dest': base64.b64encode(self.cfg['sync']['loc'].encode()).decode(),
-			'auth': self.cfg['sync']['auth']
+			'auth': base64.b64encode(self.cfg['sync']['auth'].encode()).decode(),
+			'dbloc': base64.b64encode(self.cfg['sync']['authdb'].encode()).decode()
 		}
 
 		send_payload = requests.post(
@@ -386,7 +394,7 @@ class bootlegger:
 						module_events[evt] = {}
 
 					# ???
-					display_name = f"""{md_binds_file.parent.name} {md_binds_file.basename}"""
+					display_name = f"""{md_binds_file.parent.name} {self.basename(md_binds_file)}"""
 
 					# create the events pool
 					module_events[evt][display_name] = [bnd for bnd in binds_json[evt]]
@@ -428,7 +436,7 @@ class bootlegger:
 					# also evaluate functions
 					evaluated_function = (
 						c_action['function']
-						.replace(self.this_mod_def, f'window.{self.btg_sys_name}.{current_mod_name}')
+						.replace(self.this_mod_def, f"""window.{self.btg_sys_name}.{module_binds.split(' ')[0]}""")
 						.replace(self.whole_sys_def, f'window.{self.btg_sys_name}')
 						.replace(self.storage_def, f'window.{self.btg_sys_name_storage}')
 					)
@@ -445,9 +453,10 @@ class bootlegger:
 			compiled_events += """});"""
 			compiled_events += '\n'*3
 
+		self.evbinds = compiled_events
 
 		# save the compiled result
-		(self.cfg['jsmodules'].parent / 'binds_sex.js').write_bytes(compiled_events.encode())
+		(self.cfg['jsmodules'].parent / f"""{self.cfg['sys_name']}.evbinds.js""").write_bytes(compiled_events.encode())
 
 
 
@@ -818,7 +827,21 @@ class bootlegger:
 
 
 
+	def exec_all(self):
+		# folders always have to be compiled before doing anything else
+		self.compile_folders()
+		# then, modules have to be reordered
+		self.reorder_modules()
+		# compile binds
+		self.compile_binds()
+		# if onefile is true, then also process libs and compile onefile
+		if self.cfg['onefile']:
+			onefile_path = self.path_resolver(self.cfg['onefile']['output_to']) or self.cfg['jsmodules'].parent
+			self.process_libs()
+			(onefile_path / f"""{self.cfg['sys_name']}.pwned.js""").write_bytes(self.compile_singlefile().encode())
 
+		# now exec sync
+		self.syncer()
 
 
 	def exec_onefile(self):
@@ -832,16 +855,7 @@ class bootlegger:
 
 
 
-def mdma():
-	ded = bootlegger()
-	ded.compile_folders()
-	ded.reorder_modules()
-	ded.process_libs()
-	ded.exec_onefile()
-	ded.compile_binds()
-	ded.syncer()
-	
-	# Path('test_sex.js').write_bytes(ded.)
 
 
-mdma()
+ded = bootlegger()
+ded.exec_all()
