@@ -108,7 +108,8 @@ class bootlegger:
 
 		# eval libs path, if any
 		# just do it right away, why wait, ffs
-		self.cfg['onefile']['libs'] = self.path_resolver(self.cfg['onefile']['libs'])
+		if self.cfg['onefile']:
+			self.cfg['onefile']['libs'] = self.path_resolver(self.cfg['onefile']['libs'])
 
 		# now check minimal requirements
 		# if it's still None - raise error
@@ -253,15 +254,24 @@ class bootlegger:
 				print('Reading module file', mfile.name)
 
 				# actually replace the stuff
-				evaluated = (
-					mfile.read_text(encoding='UTF-8')
-					.replace(self.this_mod_def, f'window.{self.btg_sys_name}.{current_mod_name}')
-					.replace(self.whole_sys_def, f'window.{self.btg_sys_name}')
-					.replace(self.storage_def, f'window.{self.btg_sys_name_storage}')
-				)
+				if mfile.suffix.lower() == '.css':
+					evaluated = (
+						mfile.read_text(encoding='UTF-8')
+						.replace(self.this_mod_def, current_mod_name)
+					)
+				else:
+					evaluated = (
+						mfile.read_text(encoding='UTF-8')
+						.replace(self.this_mod_def, f'window.{self.btg_sys_name}.{current_mod_name}')
+						.replace(self.whole_sys_def, f'window.{self.btg_sys_name}')
+						.replace(self.storage_def, f'window.{self.btg_sys_name_storage}')
+					)
 
 				# Write the evaulated result to the compiled modules pool, if not onlyfile
 				if not self.cfg['onlyfile']:
+					if mfile.suffix.lower() == '.js':
+						evaluated = '\n' + f'if (!window.bootlegger.{current_mod_name}){{window.bootlegger.{current_mod_name}={{}}}};' + '\n' + evaluated
+						evaluated = '\n' + f'if (!window.bootlegger){{window.bootlegger = {{}}}};' + '\n' + evaluated
 					(comp_folder_path / current_mod_name / mfile.name).write_bytes(evaluated.encode())
 
 				# now append it to the pool
@@ -290,8 +300,9 @@ class bootlegger:
 					# it's not a peoblem when it's a single file, becuase all we have to do is simply declare this somewhere in the top.
 					# But when it's a proper multi-file system - it either has to be a separate file declaring all this stuff
 					# or simply try to add this in the very beginning of every module file IF NEEDED
+					evaluated = '\n' + f'if (!window.bootlegger){{window.bootlegger = {{}}}};' + '\n' + evaluated
 					evaluated = '\n' + f'if (!window.bootlegger.{current_mod_name}){{window.bootlegger.{current_mod_name}={{}}}};' + '\n' + evaluated
-					
+
 					# write down the evaluated result
 					self.js_mods[self.basename(mod)].append(evaluated)
 				if mfile.suffix.lower() == '.css':
@@ -356,7 +367,7 @@ class bootlegger:
 		# send zip file to the remote destination
 		# headers
 		rq_headers = {
-
+			'CONTENT_TYPE': '*/*'
 		}
 
 		prms = {
@@ -371,6 +382,8 @@ class bootlegger:
 			params=prms,
 			data=pl_path.read_bytes()
 		)
+
+		print(send_payload.text)
 
 		# delete the zip payload
 		pl_path.unlink(missing_ok=True)
@@ -444,7 +457,7 @@ class bootlegger:
 					compiled_events += f"""if (event.target.closest('{c_action['selector']}'))"""
 					compiled_events += f"""{{{evaluated_function}({functionparams})}}"""
 
-					compiled_events += ('else{ ' + c_action.get('else') + '(' + functionparams + ') }') if c_action.get('else') != None else ''
+					# compiled_events += ('else{ ' + c_action.get('else') + '(' + functionparams + ') }') if c_action.get('else') != None else ''
 					compiled_events += f"""else{{{c_action.get('else')}({functionparams})}}""" if c_action.get('else') != None else ''
 
 				compiled_events += '\n'*2
