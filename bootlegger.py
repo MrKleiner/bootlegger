@@ -48,7 +48,8 @@ class bootlegger:
 			'onefile': ({}, dict),
 			'art': (True, bool),
 			'collapse': (0, int),
-			'sync': (False, dict)
+			'sync': (False, dict),
+			'fonts': (None, str)
 		}
 
 		defauls_sync = {
@@ -163,6 +164,7 @@ class bootlegger:
 		wrapped += '\n'
 		# add tabs
 		wrapped += '\n'.join([('\t'*tabs + ln) for ln in txt.split('\n')])
+		# wrapped += txt
 		wrapped += '\n'
 		wrapped += '})();'
 		return wrapped
@@ -472,6 +474,62 @@ class bootlegger:
 		(self.cfg['jsmodules'].parent / f"""{self.cfg['sys_name']}.evbinds.js""").write_bytes(compiled_events.encode())
 
 
+	def sign_fonts(self):
+		from pathlib import Path
+
+		fonts_path = self.path_resolver(self.cfg['fonts'])
+		if not fonts_path:
+			return None
+
+		css_prefab = (self.chunks / 'font.css').read_text()
+
+		fonts_dump = ''
+
+		# go through every subfolder of the fonts path
+		# every folder is a font with font files inside
+		# folder's name is also the font's name
+		for fnt in fonts_path.glob('*'):
+			# skip files inside the root fonts folder
+			# also skip this font if it was specified that it's in manual mode
+			if not fnt.is_dir() or (fnt / 'font.manual').is_file():
+				continue
+
+			# write font name, for convenience
+			fonts_dump += '/*==============================================*/'
+			fonts_dump += '\n'
+			fonts_dump += f'/*{fnt.name}*/'
+			fonts_dump += '\n'
+			fonts_dump += '/*==============================================*/'
+			fonts_dump += '\n'
+
+			# go through every single file inside every subfolder of the fonts folder
+			# and add every file as a font according to a strict schema
+			for fnt_file in fnt.glob('*'):
+				# skip if not file
+				if not fnt_file.is_file():
+					continue
+
+				# split font name
+				# every part of the font's name is a parameter
+				fnt_info = fnt_file.name.split('.')
+
+				# add this font variation to the pool
+				fonts_dump += (
+					css_prefab
+					.replace('$family', fnt.name)
+					.replace('$weight', fnt_info[0])
+					.replace('$style', fnt_info[1])
+					.replace('$filepath', f"""/{str(fnt_file.relative_to(fonts_path.parent).as_posix())}""")
+				)
+				fonts_dump += '\n'
+
+			fonts_dump += '\n'*8
+
+
+		# Write font index
+		(self.cfg['jsmodules'].parent / f"""{self.cfg['sys_name']}.fnt_index.css""").write_bytes(fonts_dump.encode())
+
+
 
 	#
 	# Onefile
@@ -487,7 +545,7 @@ class bootlegger:
 		# font_type(aka regular/italic).font_weight(aka 300)
 		fonts_path = self.path_resolver(self.cfg['onefile']['bin_fonts'])
 		if not fonts_path:
-			return
+			return []
 
 		fonts_dict = []
 		for fnt in fonts_path.glob('*'):
@@ -776,7 +834,7 @@ class bootlegger:
 		comp_file += self.commented_art('FONTS', 'tarty8')
 		comp_file += '\n'*5
 
-		self.wrap_autofunc((
+		comp_file += self.wrap_autofunc((
 			f'var fnt_pool = {self.compile_fonts()}'
 			+
 			'\n'
@@ -826,6 +884,12 @@ class bootlegger:
 		comp_file += self.commented_art('CODE', 'tarty8')
 		comp_file += '\n'*10
 
+		#
+		# Add binds, if any
+		#
+		comp_file += (self.cfg['jsmodules'].parent / f"""{self.cfg['sys_name']}.evbinds.js""").read_text()
+		comp_file += '\n'*5
+
 		# comp_file += ('\n'*10).join(self.processed_js)
 		for code in self.processed_js:
 			# cd = ('\n'*3).join(code)
@@ -847,6 +911,8 @@ class bootlegger:
 		self.reorder_modules()
 		# compile binds
 		self.compile_binds()
+		# lastly, compile fonts
+		self.sign_fonts()
 		# if onefile is true, then also process libs and compile onefile
 		if self.cfg['onefile']:
 			onefile_path = self.path_resolver(self.cfg['onefile']['output_to']) or self.cfg['jsmodules'].parent

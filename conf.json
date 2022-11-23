@@ -17,7 +17,19 @@
 	//			- file1.css
 	//			- file2.css
 	//		- module_name
+
+	// every module can have a *.binds.json files
+	// it's a temp system of binding events to functions and actions
 	"jsmodules": "",
+
+	// only counts if present, not false, not empty and not null
+	// add fonts as binaries
+	// should point to a folder with a number of subfolders where each file is a font:
+	// weight.style.ttf/woff/whatever
+	// e.g. 400.italic.ttf
+	// folder name is used as the font family name
+	// add a file called font.manual to the font folder to skip it from evulating
+	"fonts": "",
 
 	// minimal requirement: function pool name (where to store all the functions)
 	"sys_name": "",
@@ -113,8 +125,8 @@
 		// only counts if present, not false, not empty and not null
 		// add fonts as binaries
 		// should point to a folder with a number of subfolders where each file is a font:
-		// font_name(doesnt matter).weight.style.ttf/woff/whatever
-		// e.g. roboto.400.italic.ttf
+		// weight.style.ttf/woff/whatever
+		// e.g. 400.italic.ttf
 		// folder name is used as the font family name
 		"bin_fonts": "",
 
@@ -123,16 +135,7 @@
 		// should point to a folder where each file:
 		// location.location.varname.text/bytes/bytes_raw/json.decorator(any extension)
 		// location is relative to const btg = {}
-		"variables": "",
-
-
-		// compile binary fonts
-		// strict folder struct:
-		// this should point to a folder containing subfolders:
-		// every folder is a font name
-		// every file name inside that folder is:
-		// font_type(aka regular/italic).font_weight(aka 300)
-		"fonts": ""
+		"variables": ""
 	},
 
 	// it's possible to sync the processed stuff with a remote destination

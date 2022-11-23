@@ -1,17 +1,30 @@
-import os, sys, json, hashlib, base64, cgi, shutil, zipfile
+#!/usr/bin/python3
+import os, sys, json, hashlib, base64, cgi, shutil, zipfile, cgitb
 from pathlib import Path
-
-
+cgitb.enable()
+form = cgi.FieldStorage()
 # parse url params into a dict, if any
-get_cgi_params = cgi.parse()
-url_params = {}
-for it in get_cgi_params:
-	url_params[it] = ''.join(get_cgi_params[it])
+# get_cgi_params = cgi.parse()
+url_params = {
+	'dest': ''.join(form.getlist('dest')),
+	'auth': ''.join(form.getlist('auth')),
+	'dbloc': ''.join(form.getlist('dbloc'))
+}
+# for it in get_cgi_params:
+# 	url_params[it] = ''.join(get_cgi_params[it])
+
+# value = form.getlist("username")
+# usernames = ",".join(value)
+
+return_info = {}
 
 # don't even bother if auth is invalid
 def authed():
+	
 	# get byte data of the incoming request
 	byte_data = sys.stdin.buffer.read()
+
+	return_info['data_length'] = len(byte_data)
 
 	# with open(str('killme.txt'), 'w') as nein:
 	# 	nein.write(str(Path(base64.b64decode(url_params['dest'].encode()).decode())))
@@ -19,6 +32,9 @@ def authed():
 	# eval paths
 	pl_path = Path(base64.b64decode(url_params['dest'].encode()).decode()) / 'btg_incoming_playload.zip'
 	main_dir = pl_path.parent
+
+	return_info['pl_path'] = pl_path
+	return_info['main_dir'] = main_dir
 
 	# save zip file
 	pl_path.write_bytes(byte_data)
@@ -42,8 +58,13 @@ def authed():
 		# extract everything
 		zip_ref.extractall(str(main_dir))
 
+		return_info['maybe_extracted'] = True
+
 	# remove the payload
 	pl_path.unlink(missing_ok=True)
+
+	return_info['del_payload'] = True
+
 
 
 # validate auth
@@ -53,6 +74,11 @@ def check_auth():
 	# if auth was successful - proceed
 	if a_db['sync_pswd'] == base64.b64decode(url_params['auth'].encode()).decode():
 		authed()
+		return_info['all_done'] = True
+		# buffer...
+		sys.stdout.buffer.write(json.dumps(return_info).encode())
+		# it's unknown wtf does this function do, but it's just there...
+		sys.stdout.flush()
 
 check_auth()
 

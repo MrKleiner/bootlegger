@@ -1,0 +1,20 @@
+{
+	"click": [
+		{
+			"selector": "#app_topbar #nav_login",
+			"function": "$all.login.load_module",
+			"pass_event": false,
+			"pass_element": false,
+			"pass_params": ""
+		}
+	],
+	"keydown": [
+		{
+			"selector": "#app_topbar #nav_login",
+			"function": "$all.login.load_module",
+			"pass_event": false,
+			"pass_element": false,
+			"pass_params": ""
+		}
+	]
+}
