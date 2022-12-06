@@ -1,8 +1,54 @@
 
 
 
+class writeable_as_file:
+	def __init__(self, ref, global_offs=0):
+		self.ref = ref
+		self.gl_offs = global_offs
+
+	def write(self, *args):
+		return self.ref.write(*args)
+
+	def read(self, *args):
+		return self.ref.read(*args)
+
+	def seek(self, offset, from_what):
+		# args[0] += self.gl_offs
+		if from_what == 0:
+			offset += self.gl_offs
+		# print('seeking from', offset)
+		return self.ref.seek(offset, from_what)
+
+	@property
+	def cursor(self):
+		return self.pointer + global_offs
 
 
+
+class writeable_as_ram:
+	def __init__(self, ref, global_offs=0):
+		self.ref = ref
+		self.pointer = 0
+		self.gl_offs = 0
+
+	def write(self, data):
+		write_len = len(data)
+		for wr in write_len:
+			if self.pointer > write_len:
+				self.ref[0] += wr
+			else:
+				self.ref[0][self.pointer] = wr
+				self.pointer += 1
+
+	def read(self, amt):
+		print('reading from', self.pointer, 'to', amt)
+		return self.ref[0][self.pointer:self.pointer + amt]
+
+	def seek(self, amt, offs=None):
+		if offs == 0:
+			self.pointer += amt + self.gl_offs
+		else:
+			self.pointer = amt
 
 
 class lightstruct:
@@ -15,13 +61,16 @@ class lightstruct:
 	# 	return super().__new__(cls, ref, args) 
 
 	def __init__(self, ref, **args):
-		import sys
+		import sys, io
 		from pathlib import Path
 		self.Path = Path
+
+		self.io = io
 
 		self.sys = sys
 		self.struct = args
 		self.is_template = False
+		self.inram = False
 		for arg in args:
 			if len(args[arg]) < 2:
 				self.struct[arg] = (args[arg][0], 1)
@@ -29,11 +78,35 @@ class lightstruct:
 				self.struct[arg] = args[arg]
 
 		# print(args)
+		# isinstance(['sex'], list)
+
+
+		if isinstance(ref, list):
+			self.inram = True
+			self.fl_path = None
+			self.fl_ref = writeable_as_ram(ref)
+			if ref[0] == None:
+				ref[0] = b''
+				self.is_template = True
+
+			return
+
+
+		if isinstance(ref, io.BufferedIOBase):
+			self.fl_path = None
+			self.fl_ref = writeable_as_file(ref)
+
+			return
+
+
+
 		if ref != None:
 			self.fl_path = ref
-			self.fl_ref = open(str(ref), 'r+b')
+			self.fl_ref = writeable_as_file(open(str(ref), 'r+b'))
 		else:
 			self.is_template = True
+
+
 
 	def __getitem__(self, gt):
 		return self.read_rule_from_offs_file(gt)
@@ -67,6 +140,7 @@ class lightstruct:
 		for one in range(amt):
 			if rule[0] == str:
 				result.append(self.fl_ref.read(1).decode())
+				# result.append(self.fl_ref.read(1))
 
 			if rule[0] == int:
 				result.append(int.from_bytes(self.fl_ref.read(4), self.sys.byteorder))
@@ -152,12 +226,15 @@ class lightstruct:
 			self.fl_ref.write(bytes(self.eval_amount(self.struct[rule])))
 
 	# reserve bytes in a file OR apply this pattern to an existing file
-	def apply_to_file(self, flpath):
+	def apply_to_file(self, flref):
 		if not self.is_template == True:
 			return None
 
-		# return super().__new__(lightstruct, flpath, self.struct)
-		pth = self.Path(flpath)
+		if isinstance(flref, self.io.BufferedIOBase):
+			return lightstruct(flref, **self.struct)
+
+		# return super().__new__(lightstruct, flref, self.struct)
+		pth = self.Path(flref)
 		doflush = False
 		if not pth.is_file():
 			pth.write_bytes(b'')
@@ -171,8 +248,14 @@ class lightstruct:
 		return created
 
 
+	def global_offs(self, offs=0):
+		self.fl_ref.gl_offs = offs
+		# self.fl_ref.seek(offs, 0)
 
-		
+
+
+
+
 
 
 
@@ -184,20 +267,45 @@ if __name__ == '__main__':
 	os.system('cls')
 
 	generic = lightstruct(
-		r'E:\!webdesign\cbtool\proto\map\sample_cubemap_sex.vtf',
-		signature =      (str, 4),
-		version =        (int, 2),
-		headerSize =     (int, 1),
-		width =          ('short', 1),
-		height =         ('short', 1),
-		flags =          (int, 1),
-		frames =         ('short', 1),
-		firstFrame =     ('short', 1),
-		padding0 =       (str, 4),
-		reflectivity =   (float, 3),
-		padding1 =       (str, 4),
-		bumpmapScale =   (float, 1)
+		r'E:\!webdesign\cbtool\proto\map\single_texture_sex.vtf',
+		signature =            (str, 4),
+		version =              (int, 2),
+		headerSize =           (int, 1),
+		width =                ('short', 1),
+		height =               ('short', 1),
+		flags =                (int, 1),
+		frames =               ('short', 1),
+		firstFrame =           ('short', 1),
+		padding0 =             (str, 4),
+		reflectivity =         (float, 3),
+		padding1 =             (str, 4),
+		bumpmapScale =         (float, 1),
+		highResImageFormat =   (int, 1),
+		mipmapCount =          (str, 1),
+		lowResImageFormat =    (int, 1),
+		lowResImageWidth =     (str, 1),
+		lowResImageHeight =    (str, 1),
+		depth =                ('short', 1),
+		padding2 =             (str, 3),
+		numResources =         (int, 1),
+		# padding3 =             (str, 8),
+
+		tag =                  (str, 3),
+		flagz =                (str, 1),
+		offset =               (int, 1),
+
+		tag2 =                  (str, 3),
+		flagz2 =                (str, 1),
+		offset2 =               (int, 1),
+
+		tag3 =                  (str, 3),
+		flagz3 =                (str, 1),
+		offset3 =               (int, 1),
 	)
+	generic.global_offs(10)
+
+	print(generic.fl_ref)
+
 	print('')
 	print('')
 	print('')
@@ -214,6 +322,8 @@ if __name__ == '__main__':
 	print('')
 	print('')
 	print('')
+
+	# sefdggh
 
 	generic_new_path = Path(r'E:\!webdesign\cbtool\proto\map\generic_new.lol')
 	generic_new_path.write_bytes(b'')
@@ -277,3 +387,56 @@ if __name__ == '__main__':
 	print(templ2_ref['width'])
 
 	print(templ1_ref['width'])
+
+	# INRAM OPERATIONS
+	tomod = [Path(r"E:\!webdesign\cbtool\proto\map\single_texture_sex.vtf").read_bytes()]
+	# tomod = [b'']
+	ram_ops = lightstruct(
+		tomod,
+		signature =            (str, 4),
+		version =              (int, 2),
+		headerSize =           (int, 1),
+		width =                ('short', 1),
+		height =               ('short', 1),
+		flags =                (int, 1),
+		frames =               ('short', 1),
+		firstFrame =           ('short', 1),
+		padding0 =             (str, 4),
+		reflectivity =         (float, 3),
+		padding1 =             (str, 4),
+		bumpmapScale =         (float, 1),
+		highResImageFormat =   (int, 1),
+		mipmapCount =          (str, 1),
+		lowResImageFormat =    (int, 1),
+		lowResImageWidth =     (str, 1),
+		lowResImageHeight =    (str, 1),
+		depth =                ('short', 1),
+		padding2 =             (str, 3),
+		numResources =         (int, 1),
+		# padding3 =             (str, 8),
+
+		tag =                  (str, 3),
+		flagz =                (str, 1),
+		offset =               (int, 1),
+
+		tag2 =                  (str, 3),
+		flagz2 =                (str, 1),
+		offset2 =               (int, 1),
+
+		tag3 =                  (str, 3),
+		flagz3 =                (str, 1),
+		offset3 =               (int, 1),
+	)
+	ram_ops.global_offs(10)
+
+	print('')
+	print('RAM OPS')
+	print('')
+	print(ram_ops['width'])
+
+
+	print('apply template to an open file object')
+	manysex = open(r"E:\!webdesign\cbtool\proto\map\single_texture_sex.vtf", 'r+b')
+	multisex = templ.apply_to_file(manysex)
+	multisex.global_offs(10)
+	print(multisex['width'])
