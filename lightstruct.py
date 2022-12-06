@@ -41,7 +41,7 @@ class writeable_as_ram:
 				self.pointer += 1
 
 	def read(self, amt):
-		print('reading from', self.pointer, 'to', amt)
+		# print('reading from', self.pointer, 'to', amt)
 		return self.ref[0][self.pointer:self.pointer + amt]
 
 	def seek(self, amt, offs=None):
@@ -436,7 +436,10 @@ if __name__ == '__main__':
 
 
 	print('apply template to an open file object')
-	manysex = open(r"E:\!webdesign\cbtool\proto\map\single_texture_sex.vtf", 'r+b')
+	manysex = open(r"E:\!webdesign\cbtool\proto\map\single_texture_sex_2.vtf", 'r+b')
 	multisex = templ.apply_to_file(manysex)
 	multisex.global_offs(10)
-	print(multisex['width'])
+	print(multisex['reflectivity'])
+	multisex['reflectivity'] = (0.325, random(), 0.347)
+	# multisex['reflectivity'] = (0.325, 0.911, 0.347)
+	print(multisex['reflectivity'])
