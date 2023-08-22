@@ -9,7 +9,6 @@ class bootlegger:
 		self.js_mods = {}
 		self.css_mods = {}
 
-		self.btg_sys_name = 'bootlegger'
 		self.btg_sys_name_storage = 'bootlegger_storage'
 
 		self.this_mod_def = '$this'
@@ -32,45 +31,50 @@ class bootlegger:
 			read_cfg = Path(sys.argv[1]).read_text().split('\n')
 			clear_cfg = [ln for ln in read_cfg if not (ln.strip().startswith('//'))]
 			cfg_json = json.loads('\n'.join(clear_cfg))
+			print('vro wtf', cfg_json)
 		except Exception as e:
-			print('There were some problems reading the config file...')
+			print('There were some problems reading the bootlegger config file...')
 			print('See details:')
 			raise e
 
 		defauls = {
-			'jsmodules': (None, str),
-			'sys_name': (None, str),
-			'modules_order': ([], list),
-			'project': (None, str),
-			'writename': (None, str),
-			'writesuffix': (None, str),
-			'onlyfile': (False, bool),
-			'onefile': ({}, dict),
-			'art': (True, bool),
-			'collapse': (0, int),
-			'sync': (False, dict),
-			'fonts': (None, str)
+			'jsmodules':          (None, str),
+			'sys_name':           (None, str),
+			'modules_order':      ([], list),
+			'project':            (None, str),
+			'writename':          (None, str),
+			'writesuffix':        (None, str),
+			'onlyfile':           (False, bool),
+			'onefile':            ({}, dict),
+			'art':                (True, bool),
+			'collapse':           (0, int),
+			'sync':               (False, dict),
+			'fonts':              (None, str),
+			'root_module_name':   ('window.', str),
+			'override_sys_name':  ('bootlegger', str),
+			'css_context':        (True, bool),
+			'css_context_symbol': ('~~', str),
 		}
 
 		defauls_sync = {
-			'dest': (None, str),
-			'loc': (None, str),
-			'auth': (None, str),
+			'dest':      (None, str),
+			'loc':       (None, str),
+			'auth':      (None, str),
 			'sync_mods': (True, bool),
-			'folders': ([], list)
+			'folders':   ([], list)
 		}
 
 		defaults_onlyfile = {
-			'output_to': (None, str),
+			'output_to':   (None, str),
 			'file_header': (None, str),
 			'code_header': (None, str),
 			'file_footer': (None, str),
-			'sign_libs': (True, bool),
-			'libs': (None, str),
-			'libs_order': ([], list),
-			'add_libs': ([], list),
-			'bin_fonts': (None, str),
-			'variables': (None, str)
+			'sign_libs':   (True, bool),
+			'libs':        (None, str),
+			'libs_order':  ([], list),
+			'add_libs':    ([], list),
+			'bin_fonts':   (None, str),
+			'variables':   (None, str)
 		}
 
 		self.cfg = {}
@@ -95,7 +99,7 @@ class bootlegger:
 			self.cfg['sync'][cfg_sync] = defauls_sync[cfg_sync][0] if (not isinstance(cfg_json['sync'].get(cfg_sync), defauls_sync[cfg_sync][1])) else cfg_json['sync'].get(cfg_sync)
 
 
-
+		self.btg_sys_name = self.cfg['override_sys_name']
 
 		#
 		# eval paths
@@ -114,7 +118,8 @@ class bootlegger:
 
 		# now check minimal requirements
 		# if it's still None - raise error
-		if None in [self.cfg['jsmodules'], self.cfg['sys_name']]:
+		# print('kys', self.cfg)
+		if None in (self.cfg['jsmodules'], self.cfg['sys_name']):
 			raise ValueError('jsmodules or sys_name is undefined')
 
 
@@ -174,6 +179,22 @@ class bootlegger:
 			return ''
 		return pthlib.name.split('.')[0] 
 
+	def css_path(self, csstext):
+		ctx_symbol = self.cfg['css_context_symbol']
+		css = csstext.split('\n')
+		ctx = None
+
+		for li, ln in enumerate(css):
+			if f'!{ctx_symbol}' in ln:
+				ctx = ln.replace('/*', '').replace('*/', '').replace(f'!{ctx_symbol}', '').strip()
+				continue
+			if ctx_symbol in ln and ctx:
+				css[li] = ln.replace(ctx_symbol, ctx)
+
+		return '\n'.join(css)
+
+
+
 
 	def compile_folders(self):
 		import shutil
@@ -205,7 +226,7 @@ class bootlegger:
 			# If suffix is present, not auto and writename is not specified OR is auto
 			# then use what was specified
 			# Otherwise - add "_c"
-			if cfg.get('writesuffix') and str(cfg.get('writesuffix')).lower() != 'auto' and (not cfg.get('writename') or cfg.get('writename') == 'auto'):
+			if cfg.get('writesuffix') != None and str(cfg.get('writesuffix')).lower() != 'auto':
 				compiled_folder_suffix = cfg['writesuffix']
 
 			# save evaluated folder suffix
@@ -257,24 +278,63 @@ class bootlegger:
 
 				# actually replace the stuff
 				if mfile.suffix.lower() == '.css':
-					evaluated = (
-						mfile.read_text(encoding='UTF-8')
-						.replace(self.this_mod_def, current_mod_name)
-					)
+					if self.cfg['css_context']:
+						evaluated = self.css_path(mfile.read_text(encoding='UTF-8'))
+					else:
+						evaluated = (
+							mfile.read_text(encoding='UTF-8')
+							.replace(self.this_mod_def, current_mod_name)
+						)
 				else:
 					evaluated = (
 						mfile.read_text(encoding='UTF-8')
-						.replace(self.this_mod_def, f'window.{self.btg_sys_name}.{current_mod_name}')
-						.replace(self.whole_sys_def, f'window.{self.btg_sys_name}')
-						.replace(self.storage_def, f'window.{self.btg_sys_name_storage}')
+						.replace(self.this_mod_def,  f"""{self.cfg['root_module_name']}{self.btg_sys_name}.{current_mod_name}""")
+						.replace(self.whole_sys_def, f"""{self.cfg['root_module_name']}{self.btg_sys_name}""")
+						.replace(self.storage_def,   f"""{self.cfg['root_module_name']}{self.btg_sys_name_storage}""")
 					)
 
 				# Write the evaulated result to the compiled modules pool, if not onlyfile
 				if not self.cfg['onlyfile']:
 					if mfile.suffix.lower() == '.js':
-						evaluated = '\n' + f'if (!window.bootlegger.{current_mod_name}){{window.bootlegger.{current_mod_name}={{}}}};' + '\n' + evaluated
-						evaluated = '\n' + f'if (!window.bootlegger){{window.bootlegger = {{}}}};' + '\n' + evaluated
+						# evaluated = '\n' + f'if (!{self.cfg.root_module_name}{self.btg_sys_name}.{current_mod_name}){{{self.cfg.root_module_name}{self.btg_sys_name}.{current_mod_name}={{}}}};' + '\n' + evaluated
+						evaluated = (
+							'\n'
+							+
+							'if(!'
+							+
+							self.cfg['root_module_name']
+							+
+							self.btg_sys_name + '.'
+							+
+							current_mod_name
+							+ '){' +
+							self.cfg['root_module_name'] + self.btg_sys_name + '.' + current_mod_name
+							+
+							'={}};' + '\n'
+							+
+							evaluated
+						)
+						# evaluated = '\n' + f'if (!{self.cfg.root_module_name}{self.btg_sys_name}){{{self.cfg.root_module_name}{self.btg_sys_name} = {{}}}};' + '\n' + evaluated
+						
+						evaluated = (
+							'\n'
+							+
+							'if(!'
+							+
+							self.cfg['root_module_name']
+							+
+							self.btg_sys_name
+							+ '){' +
+							self.cfg['root_module_name']
+							+
+							self.btg_sys_name
+							+
+							'={}};' + '\n'
+							+
+							evaluated
+						)
 					(comp_folder_path / current_mod_name / mfile.name).write_bytes(evaluated.encode())
+
 
 				# now append it to the pool
 				# (for singlefile thingy)
@@ -302,8 +362,46 @@ class bootlegger:
 					# it's not a peoblem when it's a single file, becuase all we have to do is simply declare this somewhere in the top.
 					# But when it's a proper multi-file system - it either has to be a separate file declaring all this stuff
 					# or simply try to add this in the very beginning of every module file IF NEEDED
-					evaluated = '\n' + f'if (!window.bootlegger){{window.bootlegger = {{}}}};' + '\n' + evaluated
-					evaluated = '\n' + f'if (!window.bootlegger.{current_mod_name}){{window.bootlegger.{current_mod_name}={{}}}};' + '\n' + evaluated
+					# evaluated = '\n' + f'if (!{self.cfg.root_module_name}{self.btg_sys_name}){{{self.cfg.root_module_name}{self.btg_sys_name} = {{}}}};' + '\n' + evaluated
+					# evaluated = '\n' + f'if (!{self.cfg.root_module_name}{self.btg_sys_name}.{current_mod_name}){{{self.cfg.root_module_name}{self.btg_sys_name}.{current_mod_name}={{}}}};' + '\n' + evaluated
+					evaluated = (
+						'\n'
+						+
+						'if(!'
+						+
+						self.cfg['root_module_name']
+						+
+						self.btg_sys_name + '.'
+						+
+						current_mod_name
+						+ '){' +
+						self.cfg['root_module_name'] + self.btg_sys_name + '.' + current_mod_name
+						+
+						'={}};' + '\n'
+						+
+						evaluated
+					)
+					# evaluated = '\n' + f'if (!{self.cfg.root_module_name}{self.btg_sys_name}){{{self.cfg.root_module_name}{self.btg_sys_name} = {{}}}};' + '\n' + evaluated
+					
+					evaluated = (
+						'\n'
+						+
+						'if(!'
+						+
+						self.cfg['root_module_name']
+						+
+						self.btg_sys_name
+						+ '){' +
+						self.cfg['root_module_name']
+						+
+						self.btg_sys_name
+						+
+						'={}};' + '\n'
+						+
+						evaluated
+					)
+
+
 
 					# write down the evaluated result
 					self.js_mods[self.basename(mod)].append(evaluated)
@@ -451,9 +549,9 @@ class bootlegger:
 					# also evaluate functions
 					evaluated_function = (
 						c_action['function']
-						.replace(self.this_mod_def, f"""window.{self.btg_sys_name}.{module_binds.split(' ')[0]}""")
-						.replace(self.whole_sys_def, f'window.{self.btg_sys_name}')
-						.replace(self.storage_def, f'window.{self.btg_sys_name_storage}')
+						.replace(self.this_mod_def,  f"""{self.cfg['root_module_name']}{self.btg_sys_name}{self.btg_sys_name}.{module_binds.split(' ')[0]}""")
+						.replace(self.whole_sys_def, f"""{self.cfg['root_module_name']}{self.btg_sys_name}{self.btg_sys_name}""")
+						.replace(self.storage_def,   f"""{self.cfg['root_module_name']}{self.btg_sys_name}{self.btg_sys_name_storage}""")
 					)
 
 					compiled_events += f"""if (event.target.closest('{c_action['selector']}'))"""
@@ -866,7 +964,7 @@ class bootlegger:
 
 		comp_file += 'const btg = {};'
 		comp_file += '\n'*2
-		comp_file += 'window.bootlegger = {};'
+		comp_file += f"""{self.cfg['root_module_name']}{self.btg_sys_name} = {{}};"""
 		comp_file += '\n'*5
 
 		vars_path = self.path_resolver(self.cfg['onefile']['variables'])
