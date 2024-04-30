@@ -1,11 +1,877 @@
+from pathlib import Path as PathMain
+import json, sys, io, shutil, base64
+
+
+THISDIR = PathMain(__file__).parent
+
+MODULE_REF =  b'$this'
+SYS_REF =     b'$all'
+STORAGE_REF = b'$storage'
+BTG_SYS_CONSTANTS = b'bootlegger_storage'
+
+STR_FONT_PREFAB = (THISDIR / 'chunks' / 'font.css').read_bytes()
+
+class Path(type(PathMain())):
+	@property
+	def basename(self):
+		return self.name.split('.')[0]
+
+
+def multi_replace(tgt_bytes, replacements):
+	if type(replacements) == dict:
+		tgt_iter = replacements.items()
+	else:
+		tgt_iter = replacements
+
+	cv_dict = {
+		bytes: {
+			bytes: lambda e: e,
+			str: lambda e: e.encode(),
+		},
+		str: {
+			bytes: lambda e: e.decode(),
+			str: lambda e: e,
+		}
+	}
+
+	src_data_type = type(tgt_bytes)
+
+	for query, replace_with in tgt_iter:
+		# todo: smarter way of achieving this
+		tgt_bytes = tgt_bytes.replace(
+			cv_dict[src_data_type][type(query)](query),
+			cv_dict[src_data_type][type(replace_with)](replace_with),
+		)
+	return tgt_bytes
 
 
 
-class bootlegger:
+class BTGWritePaths:
+	def __init__(self, btg):
+		self.btg = btg
+		self._modules_out_dir = None
+		self._fonts_index = None
+		self._singlefile = None
+
+	@property
+	def modules_out_dir(self):
+		if self._modules_out_dir != None:
+			return self._modules_out_dir
+
+		modules_dir = self.btg.resolve_path(self.btg.cfg['jsmodules'])
+		print('Modules dir in out', modules_dir)
+		tgt_write_dir = self.btg.cfg['writename']
+		print('tgt write dir in out', modules_dir)
+
+		# If not explicitely specified - write next to sources
+		if not tgt_write_dir:
+			tgt_write_dir = (
+				modules_dir.parent /
+				f"""{modules_dir.name}{self.btg.cfg['writesuffix']}"""
+			)
+			print('Writing next to sources:', tgt_write_dir)
+		else:
+			# If project is specified - try writing relative to it
+			# Else - try relative to sources
+			write_base = self.btg.cfg.project_dir or modules_dir.parent
+			tgt_write_dir = (write_base / tgt_write_dir).resolve()
+			print('Writing next to project:', tgt_write_dir, write_base, tgt_write_dir)
+
+		if not tgt_write_dir.parent.exists() or tgt_write_dir == modules_dir:
+			self._modules_out_dir = False
+		else:
+			self._modules_out_dir = tgt_write_dir
+
+		print('Resolved tgt write dir', self._modules_out_dir)
+		return self._modules_out_dir
+
+	def resolve_path(self, query):
+		if not query:
+			return None
+
+		query = Path(str(query))
+
+		# 1 - Check if the path is absolute
+		#     and exists already
+		if query.is_absolute():
+			if query.parent.is_dir():
+				return query
+
+		# 2 - check relative to the project
+		if self.btg.cfg.project_dir:
+			project_relative = (self.btg.cfg.project_dir / query).resolve()
+			if project_relative.parent.is_dir():
+				return project_relative
+
+		# 3 - check relative to the modules dir
+		if self.modules_out_dir:
+			modules_relative = (self.modules_out_dir / query).resolve()
+			if modules_relative.parent.is_dir():
+				return project_relative
+
+		# Finally return None, if the path could no be resolved
+		return None
+
+	@property
+	def fonts_index(self):
+		if self._fonts_index != None:
+			return self._fonts_index
+
+		# Try using the path provided in the config
+		tgt_path = self.resolve_path(self.btg.cfg['fonts']['output_tgt'])
+		if not tgt_path:
+			self._fonts_index = False
+		else:
+			self._fonts_index = tgt_path
+
+		return self._fonts_index
+
+	@property
+	def singlefile(self):
+		if self._singlefile != None:
+			return self._singlefile
+
+		# Try using the path provided in the config
+		tgt_path = self.resolve_path(self.btg.cfg['onefile']['output_tgt'])
+		if not tgt_path:
+			self._singlefile = False
+		else:
+			self._singlefile = tgt_path
+
+		return self._singlefile
+
+
+
+class BTGConfig:
+	DEFAULTS_BASE = {
+		'jsmodules':           ('modules',      str, False ),
+		'project':             (None,           str,       ),
+		'writename':           (None,           str, False ),
+		'writesuffix':         ('_c',           str, False ),
+		'simplify':            (0,              int,       ),
+		'sys_name':            ('__bootlegger', str, False ),
+		'collapse_modules':    (False,          bool,      ),
+		'fonts':               ({},             dict,      ),
+		'onefile':             ({},             dict,      ),
+		# 'art':                 (True, bool),
+		'sync':                ({},             dict,      ),
+		'root_module_name':    ('window.',      str, False ),
+		'css_context':         (True,           bool,      ),
+		'css_context_symbol':  ('~~',           str, False ),
+		'use_global_ctx_prop': (False,          bool,False ),
+	}
+	DEFAULTS_SYNC = {
+		'do_sync':   (True, bool, ),
+		'dest':      (None, str,  ),
+		'loc':       (None, str,  ),
+		'auth':      (None, str,  ),
+		'sync_mods': (True, bool, ),
+		'folders':   ([],   list, )
+	}
+	DEFAULTS_ONEFILE = {
+		'do_onefile':            (False, bool),
+		'onefile_only':          (False, bool),
+		'output_tgt':            ('compound.js', str),
+		'file_header':           (None, str),
+		'scenario':              ([], list),
+		'sign_libs':             (True, bool),
+		'libs':                  (None, str),
+		'libs_order':            ([], list),
+		'add_libs':              ([], list),
+		'module_order':          ([], list),
+		'bin_fonts':             (None, str),
+		'variables':             (None, str),
+		'separate_module_files': (False, bool),
+	}
+	DEFAULTS_FONTS = {
+		'do_fonts':    (False,            bool,      ),
+		'src_dir':     ('fonts',          str, False ),
+		'output_tgt':  ('font_index.css', str, False ),
+		'url_prefix':  ('',               str,       ),
+	}
+	DEFAULTS_CLS_REFERENCE = {
+		# !%~ pause ?= _pause, resume ?= _resume
+		'definition_symbol': ('!%~', bool, ),
+		'async_prefix':      ('?',   str,  ),
+	}
+	CFG_GRP_DICT = {
+		'sync':    DEFAULTS_SYNC,
+		'onefile': DEFAULTS_ONEFILE,
+		'fonts':   DEFAULTS_FONTS,
+		'cls':     DEFAULTS_CLS_REFERENCE,
+	}
+
+	# input_data can be either a dict
+	# or a path pointing to a json file
+	def __init__(self, input_data):
+		self.cfg_file_path = None
+		self.cfg_file_dir = None
+		print('Input cfg data:', input_data)
+		if type(input_data) != dict:
+			# todo: this was moved up, becuase input_data
+			# gets overridden with a json dict
+			self.cfg_file_path = Path(input_data)
+			self.cfg_file_dir = Path(input_data).parent
+
+			# Some editors recognize // as comments in json files.
+			# This adds a VERY primitive support for that.
+			# Don't lie, comments in json files are handy.
+			lines = Path(input_data).read_bytes().split(b'\n')
+			input_data = json.loads(
+				b'\n'.join([l for l in lines if not l.strip().startswith(b'//')])
+			)
+
+		# Base data
+		self.cfg_data = self.merge(
+			input_data,
+			self.DEFAULTS_BASE
+		)
+
+		print('CFG data:', self.cfg_data)
+
+		# Config groups
+		# todo: merge right into cfg_data
+		for grp_name, grp_data in self.CFG_GRP_DICT.items():
+			input_cfg = input_data.get(grp_name)
+			if input_cfg:
+				self.cfg_data[grp_name] = self.merge(
+					input_cfg,
+					grp_data
+				)
+			else:
+				print('CFG Group', grp_name, 'Not present')
+				self.cfg_data[grp_name] = self.merge(
+					{},
+					grp_data
+				)
+
+		self.cfg_data['jsmodules'] = Path(self.cfg_data['jsmodules'])
+
+		# todo: wtf is this ?
+		self.project_dir = None
+		if self.cfg_data['project']:
+			self.project_dir = Path(self.cfg_data['project'])
+			if not self.project_dir.is_dir():
+				self.project_dir = None
+
+	@staticmethod
+	def merge(input_data, defaults):
+		merge_result = {}
+		for cfg_key in defaults:
+			def_value, tgt_type, *can_be_falsy = defaults[cfg_key]
+			input_entry_data = input_data.get(cfg_key)
+
+			if not isinstance(input_entry_data, tgt_type):
+				merge_result[cfg_key] = def_value
+			else:
+				if can_be_falsy and not can_be_falsy[0] and not input_entry_data:
+					merge_result[cfg_key] = def_value
+				else:
+					merge_result[cfg_key] = input_entry_data
+
+		return merge_result
+
+	def __getitem__(self, keyname):
+		return self.cfg_data.get(keyname)
+
+
+class BTGEasySync:
+	def __init__(self, btg):
+		self.btg = btg
+		self.cfg = btg.cfg['sync']
+
+
+class ScenarioEntry:
+	def __init__(self, entry_dict):
+		self.entry_dict = entry_dict
+
+		self._target = None
+		self._wrap = False
+		self._process = False
+
+		self.bad_target = ('.', '../', '', '/', '\\', './',)
+		self.sys_targets = ('?main',)
+
+	@property
+	def target(self):
+		if self._target != None:
+			return self._target
+
+		data = self.entry_dict.get('target', '').strip()
+
+		if data.lower() in self.sys_targets:
+			self._target = data.lower()
+			return self._target
+
+		if not data or (data in self.bad_target):
+			self._target = False
+			return None
+
+		self._target = data
+		return self._target
+
+	@property
+	def wrap(self):
+		return self.entry_dict.get('wrap', False)
+
+	@property
+	def process(self):
+		return self.entry_dict.get('process', False)
+	
+
+
+class OneFile:
+	def __init__(self, btg):
+		self.btg = btg
+		self.cfg = btg.cfg['onefile']
+		self.buf = io.BytesIO()
+
+	# Only used for abstract files for now.
+	# Replaces:
+	#  - $this -> Modules dir reference
+	#  - $all -> Modules dir reference
+	#  - $storage -> Variables storage
+	def place_js_constants(self, tgt_bytes):
+		if not type(tgt_bytes) in (str, bytes):
+			print(
+				'Fatal: Could not place JS constants into an',
+				"""arbitrary buffer, because it's of type""",
+				type(tgt_bytes), 'but can only be of type bytes|str',
+			)
+			return ''
+
+		return multi_replace(tgt_bytes, [
+			(
+				MODULE_REF,
+				self.btg.base_js_path
+			),
+			(
+				SYS_REF,
+				self.btg.base_js_path
+			),
+			(
+				STORAGE_REF,
+				f"""{self.btg.cfg['root_module_name']}{BTG_SYS_CONSTANTS}"""
+			)
+		])
+
+	# Write modules composite data to the buffer
+	def write_main(self):
+		if self.cfg['separate_module_files']:
+			for mdname, mdata in self.btg.modules.items():
+				for _, jsbuf in mdata['js']:
+					with WrapJSCode(self.buf) as wrap:
+						wrap.write(jsbuf)
+		else:
+			for mdname, mdata in self.btg.modules.items():
+				with WrapJSCode(self.buf) as wrap:
+					for _, jsbuf in mdata['js']:
+						wrap.write(jsbuf)
+
+	# Write the resulting buffer to a file
+	def write_file(self):
+		if not self.btg.write_paths.singlefile:
+			print(
+				'Could not resolve singlefile write path:',
+				self.btg.write_paths.singlefile
+			)
+			return
+		self.btg.write_paths.singlefile.write_bytes(self.buf.getvalue())
+
+	def write_css(self):
+		self.buf.write(b'\n')
+		with WrapJSCode(self.buf) as wrap:
+			wrap.write('let cssb64 = ['.encode())
+			for mdname, mdata in self.btg.modules.items():
+				for _, jsbuf in mdata['css']:
+					Bootlegger.buf_line_write(self.buf, [
+						'`', base64.b64encode(jsbuf.getvalue()), '`,'
+					])
+			wrap.write('];'.encode())
+			wrap.write(b'\n')
+
+			wrap.write(
+				(THISDIR / 'chunks' / 'bin_css.js').read_bytes()
+			)
+
+	def run(self):
+		# Write global header file
+		fheader = self.btg.resolve_path(self.cfg['file_header'], 'file')
+		if fheader:
+			self.buf.write(fheader.read_bytes())
+			self.buf.write(b'\n'*5)
+		else:
+			print('File header not present, not writing')
+
+		# todo: write libs here
+		# todo: write sys funcs here
+		# todo: test: quick sys funcs write
+		self.buf.write(
+			(THISDIR / 'chunks' / 'btg_util.js').read_bytes()
+		)
+		# todo: write fonts here
+		# todo: write css here
+		# todo: test: force write binary css
+		self.write_css()
+		# todo: write variables here
+
+		# Write scenario
+		# todo: separate into a function?
+		main_done = False
+		for sc_entry in map(ScenarioEntry, self.cfg['scenario']):
+			self.buf.write(b'\n')
+
+			if (sc_entry.target == '?main') and not main_done:
+				self.write_main()
+				main_done = True
+				continue
+
+			# If it's not a sys entry - treat like an abstract file
+			file_path = self.btg.resolve_path(sc_entry.target, 'file')
+			if not file_path:
+				print(
+					'WARNING: Could not resolve target path',
+					sc_entry.target,
+					'from a scenario entry',
+					self.btg.cfg.cfg_file_dir
+				)
+				continue
+
+			# Get the contents of the file
+			data_bytes = file_path.read_bytes()
+
+			# Execute actions on it, if any
+			if sc_entry.process:
+				data_bytes = self.place_js_constants(data_bytes)
+			if sc_entry.wrap:
+				with WrapJSCode(self.buf) as wrap:
+					wrap.write(data_bytes)
+			else:
+				self.buf.write(data_bytes)
+
+		if not main_done:
+			self.write_main()
+
+		# Write the resulting file to disk
+		self.write_file()
+
+
+
+class BTGFont:
+	def __init__(self, fonts_dir, url_prefix='', no_decor=False):
+		self.no_decor = no_decor
+		self.fonts_dir = Path(fonts_dir)
+		self.font_name = self.fonts_dir.name
+		self.str_buf = None
+		self.bin_buf = None
+		self.font_data_index = None
+		self.url_prefix = url_prefix or ''
+
+	# A dict with all the file paths indexed
+	# according to weight/style
+	@property
+	def data_index(self):
+		if self.font_data_index:
+			return self.font_data_index
+
+		font_data = {}
+
+		for font_file in self.fonts_dir.glob('*'):
+			if not font_file.is_file():
+				continue
+
+			# todo: better way of doing this?
+			fweight, fstyle, fext = font_file.name.split('.')
+			fweight = int(fweight)
+			fstyle = fstyle.strip()
+			fext = fext.strip()
+
+			if not font_data.get(fweight):
+				font_data[fweight] = {}
+
+			font_data[fweight][fstyle] = font_file
+
+		self.font_data_index = font_data
+
+	# CSS with URLs
+	@property
+	def str_data(self):
+		if self.str_buf:
+			return self.str_buf
+
+		font_data = self.data_index
+		self.str_buf = io.BytesIO()
+
+		Bootlegger.buf_line_write(self.str_buf, [
+			'/*==============================================*/',
+			'\n',
+			f'/*{self.fonts_dir.name}*/',
+			'\n',
+			'/*==============================================*/',
+			'\n',
+		])
+
+		for fweight, weight_styles in self.font_data_index.items():
+			for fstyle, font_file in weight_styles.items():
+				css_url = f'{self.url_prefix}/{self.fonts_dir.name}/{font_file.name}'
+
+				self.str_buf.write(
+					multi_replace(STR_FONT_PREFAB, [
+						('$family',   self.font_name ),
+						('$weight',   str(fweight)   ),
+						('$style',    fstyle         ),
+						('$filepath', css_url        ),
+					])
+				)
+
+				self.str_buf.write(b'\n')
+
+		return self.str_buf
+
+	# A stringified json dict with font file content as base64
+	@property
+	def bin_data(self):
+		if self.bin_buf:
+			return self.bin_buf
+
+		font_data = self.data_index
+		# self.str_buf = io.BytesIO()
+		fonts_dict = []
+
+		for fweight, weight_styles in self.font_data_index.items():
+			for fstyle, font_file in weight_styles.items():
+				fonts_dict.append({
+					'family': self.font_name,
+					'weight': fweight,
+					'fstyle': fstyle,
+					'bt': base64.b64encode(font_file.read_bytes()).decode(),
+				})
+
+		self.bin_buf = json.dumps(fonts_dict)
+
+
+class WrapJSCode:
+	def __init__(self, tgt_buf):
+		self.buf = tgt_buf
+
+	def __enter__(self):
+		self.buf.write(b'(function() {')
+		self.buf.write(b'\n')
+		return self
+		
+	def __exit__(self, type, value, traceback):
+		self.buf.write(b'\n')
+		self.buf.write(b'})();')
+		self.buf.write(b'\n')
+
+	def write(self, data):
+		if type(data) == bytes:
+			self.buf.write(data)
+		else:
+			data.seek(0)
+			# todo: is .read() actually any different from .getvalue() ?
+			# (should be better than getvalue)
+			self.buf.write(data.read())
+
+
+class ModuleUnit:
+	def __init__(self, btg, module_abspath):
+		self.btg = btg
+		self.md_path = Path(module_abspath)
+		self.md_name = self.md_path.basename
+
+		self.buffers = {
+			'js':    [],
+			'css':   [],
+			'other': [],
+		}
+
+		self._compound_js = None
+		self._compound_css = None
+
+	@property
+	def compound_js(self):
+		if self._compound_js != None:
+			return self._compound_js
+
+	def __getitem__(self, tgt_item):
+		if not tgt_item in self.buffers:
+			print(
+				'Fatal: requested', tgt_item,
+				'from ModuleUnit buffers, but it does not exist'
+			) 
+
+
+
+# todo: Create custom buffer class
+# with wrap functions and line writes
+class Bootlegger:
+	def __init__(self, cfg_data):
+		self.cfg = BTGConfig(cfg_data)
+		# todo: There's a miniscule amount of Geneva convention violations:
+		# BTGWritePaths may or may not depend on when exactly it was
+		# initialized
+		self.write_paths = BTGWritePaths(self)
+		self.modules = {}
+		self.fonts = []
+
+		self.js_simplify = [
+			lambda l: not l.strip().startswith(b'//'),
+			lambda l: not l.strip().startswith(b'//') and l.strip(),
+		]
+
+		self.one_file = OneFile(self)
+
+	@staticmethod
+	def buf_line_write(tgt_buf, lines):
+		for l in lines:
+			tgt_buf.write(
+				l.encode() if isinstance(l, str) else l
+			)
+
+	@staticmethod
+	def wrap_autoexec_func(tgt_str, indent=0, tgt_buf=None):
+		buf = tgt_buf or io.BytesIO()
+		buf.write(b'\t'*indent)
+		buf.write(b'(function() {')
+		buf.write(b'\n')
+		# todo: simply replace line breaks, like '\n\t' ?
+		for ln in tgt_str.split(b'\n'):
+			buf.write(b'\t'*indent)
+			buf.write(b'\t')
+			buf.write(ln.encode())
+		buf.write(b'\n')
+		buf.write(b'\t'*indent)
+		buf.write(b'})();')
+
+		return buf
+
+	def resolve_path(self, query, path_type='dir'):
+		if not query:
+			return
+
+		proj_root = Path(str(self.cfg['project'])) if self.cfg['project'] else None
+		query = Path(str(query))
+
+		resolved = None
+
+		# 1 - Check if it's absolute and exists already
+		if query.exists():
+			resolved = query
+
+		# 2 - Try checking relative to the project
+		#     if project was specified
+		if proj_root and not resolved:
+			proj_rel = (proj_root / query).resolve()
+			if proj_rel.exists():
+				resolved = proj_rel
+
+		# 3 - Try checking relative to config file,
+		#     if possible.
+		if not resolved and self.cfg.cfg_file_dir:
+			print('Final try: resolving shit', self.cfg.cfg_file_dir, query)
+			cfg_dir_rel = (self.cfg.cfg_file_dir / query).resolve()
+			if cfg_dir_rel.exists():
+				resolved = cfg_dir_rel
+
+		# 4 - Finally, check if the resolved path is of
+		#     requested type
+		if resolved:
+			if (path_type == 'dir' and not resolved.is_dir()) \
+			or (path_type == 'file' and not resolved.is_file()) :
+				print(
+					'Resolved path',
+					resolved,
+					'is not of required type',
+					path_type
+				)
+				return None
+
+		# 5: todo: security: make sure the resolved query
+		# doesn't point to an obscure location
+
+		return resolved
+
+	@property
+	def base_js_path(self):
+		return f"""{self.cfg['root_module_name']}{self.cfg['sys_name']}"""
+
+	# tgt_module is absolute path
+	def process_module(self, tgt_module_dir):
+		tgt_module_dir = Path(tgt_module_dir)
+		tgt_module_name = tgt_module_dir.basename
+		self.modules[tgt_module_name] = {
+			'js':    [],
+			'css':   [],
+			'other': [],
+		}
+		tgt_module = self.modules[tgt_module_name]
+
+		for file in tgt_module_dir.glob('*'):
+			if not file.is_file():
+				continue
+
+			file_bytes = file.read_bytes()
+			file_buf = io.BytesIO()
+
+			if file.suffix != '.css':
+				file_bytes = multi_replace(file_bytes, [
+					(
+						MODULE_REF,
+						f"""{self.base_js_path}.{tgt_module_name}"""
+					),
+					(
+						SYS_REF,
+						self.base_js_path
+					),
+					(
+						STORAGE_REF,
+						f"""{self.cfg['root_module_name']}{BTG_SYS_CONSTANTS}"""
+					)
+				])
+
+			if file.suffix == '.js':
+				simplify = self.cfg['simplify']
+				if simplify > 0:
+					flines = file_bytes.split(b'\n')
+					file_bytes = b'\n'.join(
+						filter(self.js_simplify[simplify-1], flines)
+					)
+
+				self.buf_line_write(file_buf, [
+					'\n',
+					'if(!', self.base_js_path, '){', self.base_js_path, '={}};',
+					'\n',
+
+					'if(!', self.base_js_path, '.', tgt_module_name, '){',
+						self.base_js_path, '.', tgt_module_name, '={}};',
+					'\n',
+
+					file_bytes
+				])
+				tgt_module['js'].append(
+					(file.name, file_buf)
+				)
+				continue
+
+			if file.suffix == '.css':
+				ctx_symbol = self.cfg['css_context_symbol']
+				ctx_declare = f'!{ctx_symbol}'.encode()
+				css_lines = file_bytes.split(b'\n')
+				ctx = None
+
+				for li, ln in enumerate(css_lines):
+					# todo: safer detection ?
+					if ctx_declare in ln:
+						ctx = multi_replace(ln, [
+							('/*', ''),
+							('*/', ''),
+							(ctx_declare, '')
+						]).strip()
+						continue
+					# important todo: .encode in advance
+					if ctx_symbol.encode() in ln and ctx:
+						css_lines[li] = multi_replace(ln, [
+							(ctx_symbol, ctx)
+						])
+
+				# todo: is join faster than writing the lines
+				# individually ?
+				file_buf.write(
+					b'\n'.join(css_lines)
+				)
+				tgt_module['css'].append(
+					(file.name, file_buf)
+				)
+				continue
+
+			file_buf.write(file_bytes)
+			tgt_module['other'].append(
+				(file.name, file_buf)
+			)
+
+	def process_fonts(self):
+		fonts_dir = self.resolve_path(self.cfg['fonts']['src_dir'])
+		if not fonts_dir:
+			print('Bad font dir')
+			return
+
+		url_prefix = self.cfg['fonts']['url_prefix'] or f'/{fonts_dir.name}'
+
+		for fnt in fonts_dir.glob('*'):
+			if not fnt.is_dir():
+				continue
+
+			self.fonts.append(
+				BTGFont(fnt, url_prefix)
+			)
+
+	def make_modules(self):
+		modules_dir = self.resolve_path(self.cfg['jsmodules'])
+		if not modules_dir:
+			print('Modules source dir does not exist')
+		for module_dir in modules_dir.glob('*'):
+			if not module_dir.is_dir():
+				continue
+
+			self.process_module(module_dir)
+
+	# Sequentially run everything according to config
+	def run(self):
+		# 1 - Main things first:
+		#     process javascript
+		self.make_modules()
+
+		# 2 - Process fonts, if any:
+		if self.cfg['fonts']['do_fonts'] and not self.cfg['onefile']['onefile_only']:
+			self.process_fonts()
+
+		module_write_tgt = self.write_paths.modules_out_dir
+		if not module_write_tgt:
+			print(
+				'Fatal Error: Could not find a suitable place to output',
+				'compiled modules.',
+				'Is the output destination same as source?',
+				'Does parent of the output destination exist?',
+				'Sources:', self.resolve_path(self.cfg['jsmodules']),
+				'Output:', module_write_tgt,
+			)
+			return
+
+		# Write modules
+		if not self.cfg['onefile']['onefile_only']:
+			# Wipe the write destination dir
+			shutil.rmtree(module_write_tgt, ignore_errors=True)
+
+			for mdname, mdata in self.modules.items():
+				for ftype in ('js', 'css', 'other'):
+					for fname, fbuf in mdata[ftype]:
+						write_tgt = module_write_tgt / mdname / fname
+						write_tgt.parent.mkdir(parents=True, exist_ok=True)
+						write_tgt.write_bytes(fbuf.getvalue())
+
+		# Write fonts
+		if self.cfg['fonts']['do_fonts'] and not self.cfg['onefile']['onefile_only']:
+			print('Writing fonts')
+			self.write_paths.fonts_index.unlink(missing_ok=True)
+			with open(self.write_paths.fonts_index, 'wb') as fnt_idx:
+				for fnt in self.fonts:
+					fnt_idx.write(fnt.str_data.getvalue())
+					fnt_idx.write(b'\n')
+
+		# Write onefile
+		if self.cfg['onefile']['do_onefile']:
+			self.one_file.run()
+
+		print('Done building')
+
+
+
+
+
+
+class _Bootlegger:
 	def __init__(self, cfgpath='nil'):
-		from pathlib import Path
-		import json, sys
-
 		self.js_mods = {}
 		self.css_mods = {}
 
@@ -124,8 +990,7 @@ class bootlegger:
 
 
 	def path_resolver(self, query=None, tp='dir'):
-		from pathlib import Path
-		if query == None or query == '':
+		if query in (None, '', False, b''):
 			return
 
 		qry = Path(str(query))
@@ -177,7 +1042,7 @@ class bootlegger:
 	def basename(self, pthlib=None):
 		if not pthlib:
 			return ''
-		return pthlib.name.split('.')[0] 
+		return pthlib.name.split('.')[0]
 
 	def css_path(self, csstext):
 		ctx_symbol = self.cfg['css_context_symbol']
@@ -1033,6 +1898,10 @@ class bootlegger:
 
 
 
+if __name__ == '__main__':
+	# print('Sys args', Path(sys.argv[1]))
+	btg = Bootlegger(
+		Path(sys.argv[1])
+	)
+	btg.run()
 
-ded = bootlegger()
-ded.exec_all()
