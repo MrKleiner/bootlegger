@@ -59,9 +59,7 @@ class BTGWritePaths:
 			return self._modules_out_dir
 
 		modules_dir = self.btg.resolve_path(self.btg.cfg['jsmodules'])
-		print('Modules dir in out', modules_dir)
 		tgt_write_dir = self.btg.cfg['writename']
-		print('tgt write dir in out', modules_dir)
 
 		# If not explicitely specified - write next to sources
 		if not tgt_write_dir:
@@ -69,20 +67,17 @@ class BTGWritePaths:
 				modules_dir.parent /
 				f"""{modules_dir.name}{self.btg.cfg['writesuffix']}"""
 			)
-			print('Writing next to sources:', tgt_write_dir)
 		else:
 			# If project is specified - try writing relative to it
 			# Else - try relative to sources
 			write_base = self.btg.cfg.project_dir or modules_dir.parent
 			tgt_write_dir = (write_base / tgt_write_dir).resolve()
-			print('Writing next to project:', tgt_write_dir, write_base, tgt_write_dir)
 
 		if not tgt_write_dir.parent.exists() or tgt_write_dir == modules_dir:
 			self._modules_out_dir = False
 		else:
 			self._modules_out_dir = tgt_write_dir
 
-		print('Resolved tgt write dir', self._modules_out_dir)
 		return self._modules_out_dir
 
 	def resolve_path(self, query):
@@ -145,7 +140,7 @@ class BTGWritePaths:
 class BTGConfig:
 	DEFAULTS_BASE = {
 		'jsmodules':           ('modules',      str, False ),
-		'project':             (None,           str,       ),
+		'project':             (None,           str, True, ),
 		'writename':           (None,           str, False ),
 		'writesuffix':         ('_c',           str, False ),
 		'simplify':            (0,              int,       ),
@@ -191,14 +186,19 @@ class BTGConfig:
 	}
 	DEFAULTS_CLS_REFERENCE = {
 		# !%~ pause ?= _pause, resume ?= _resume
-		'definition_symbol': ('!%~', bool, ),
+		'definition_symbol': ('!%~', str,  ),
 		'async_prefix':      ('?',   str,  ),
 	}
+	DEFAULTS_MD_COLLAPSE = {
+		'collapse': (False, bool,),
+		'ordering': ({},    dict,),
+	}
 	CFG_GRP_DICT = {
-		'sync':    DEFAULTS_SYNC,
-		'onefile': DEFAULTS_ONEFILE,
-		'fonts':   DEFAULTS_FONTS,
-		'cls':     DEFAULTS_CLS_REFERENCE,
+		'sync':        DEFAULTS_SYNC,
+		'onefile':     DEFAULTS_ONEFILE,
+		'md_collapse': DEFAULTS_MD_COLLAPSE,
+		'fonts':       DEFAULTS_FONTS,
+		'cls':         DEFAULTS_CLS_REFERENCE,
 	}
 
 	# input_data can be either a dict
@@ -206,7 +206,7 @@ class BTGConfig:
 	def __init__(self, input_data):
 		self.cfg_file_path = None
 		self.cfg_file_dir = None
-		print('Input cfg data:', input_data)
+		print('Input cfg data file:', input_data)
 		if type(input_data) != dict:
 			# todo: this was moved up, becuase input_data
 			# gets overridden with a json dict
@@ -227,7 +227,7 @@ class BTGConfig:
 			self.DEFAULTS_BASE
 		)
 
-		print('CFG data:', self.cfg_data)
+		print('Input CFG data:', self.cfg_data)
 
 		# Config groups
 		# todo: merge right into cfg_data
@@ -254,17 +254,22 @@ class BTGConfig:
 			if not self.project_dir.is_dir():
 				self.project_dir = None
 
+		print('Processed CFG data:', self.cfg_data)
+
 	@staticmethod
 	def merge(input_data, defaults):
 		merge_result = {}
 		for cfg_key in defaults:
 			def_value, tgt_type, *can_be_falsy = defaults[cfg_key]
+			if can_be_falsy:
+				can_be_falsy = can_be_falsy[0]
+
 			input_entry_data = input_data.get(cfg_key)
 
-			if not isinstance(input_entry_data, tgt_type):
+			if not isinstance(input_entry_data, tgt_type) or (can_be_falsy and not input_entry_data):
 				merge_result[cfg_key] = def_value
 			else:
-				if can_be_falsy and not can_be_falsy[0] and not input_entry_data:
+				if not can_be_falsy and not input_entry_data:
 					merge_result[cfg_key] = def_value
 				else:
 					merge_result[cfg_key] = input_entry_data
@@ -359,13 +364,13 @@ class OneFile:
 	def write_main(self):
 		if self.cfg['separate_module_files']:
 			for mdname, mdata in self.btg.modules.items():
-				for _, jsbuf in mdata['js']:
+				for _, jsbuf in mdata.js_buffers:
 					with WrapJSCode(self.buf) as wrap:
 						wrap.write(jsbuf)
 		else:
 			for mdname, mdata in self.btg.modules.items():
 				with WrapJSCode(self.buf) as wrap:
-					for _, jsbuf in mdata['js']:
+					for _, jsbuf in mdata.js_buffers:
 						wrap.write(jsbuf)
 
 	# Write the resulting buffer to a file
@@ -575,36 +580,225 @@ class WrapJSCode:
 
 
 class ModuleUnit:
+	# todo: module_abspath must be absolute
 	def __init__(self, btg, module_abspath):
 		self.btg = btg
 		self.md_path = Path(module_abspath)
 		self.md_name = self.md_path.basename
 
+		# self.js_buf = []
+		# self.css_buf = []
+		# self.other_buf = []
+
 		self.buffers = {
-			'js':    [],
-			'css':   [],
-			'other': [],
+			'js': None,
+			'css': None,
+			'other': None,
 		}
+
+		self.known_extensions = (
+			'.js',
+			'.css',
+		)
 
 		self._compound_js = None
 		self._compound_css = None
+
+		self._file_list = None
+
+	@property
+	def file_list(self):
+		if self._file_list != None:
+			return self._file_list
+
+		self._file_list = [f for f in self.md_path.glob('*') if f.is_file()]
+		return self._file_list
+
+	def __getitem__(self, tgt_item):
+		if not tgt_item in self.buffers:
+			print(
+				'Fatal: requested', tgt_item,
+				'from ModuleUnit buffers, but can only get',
+				tuple(self.buffers.keys())
+			)
+
+	def place_js_constants(self, tgt_bytes):
+		return multi_replace(tgt_bytes, [
+			(
+				MODULE_REF,
+				f"""{self.btg.base_js_path}.{self.md_name}"""
+			),
+			(
+				SYS_REF,
+				self.btg.base_js_path
+			),
+			(
+				STORAGE_REF,
+				f"""{self.btg.cfg['root_module_name']}{BTG_SYS_CONSTANTS}"""
+			)
+		])
+
 
 	@property
 	def compound_js(self):
 		if self._compound_js != None:
 			return self._compound_js
 
-	def __getitem__(self, tgt_item):
-		if not tgt_item in self.buffers:
-			print(
-				'Fatal: requested', tgt_item,
-				'from ModuleUnit buffers, but it does not exist'
-			) 
+		# todo: the Path() approach is retarded
+		tgt_files = {fname:fbuf for fname, fbuf in self.buffers['js']}
+
+		compound_buf = io.BytesIO()
+
+		# First - try finding file with .main suffix
+		for fname, fbuf in tgt_files.items():
+			if '.main' in fname.lower():
+				compound_buf.write(fbuf.getvalue())
+				del tgt_files[fname]
+				break
+
+		# Then, process the remaining files
+		for fname, fbuf in tgt_files.items():
+			compound_buf.write(fbuf.getvalue())
+
+		self._compound_js = compound_buf
+		return self._compound_js
+
+	@property
+	def js_buffers(self):
+		if self.buffers['js'] != None:
+			return self.buffers['js']
+
+		self.buffers['js'] = []
+
+		base_js_path = self.btg.base_js_path
+		for js_file in self.file_list:
+			if js_file.suffix != '.js':
+				continue
+
+			# Read the file
+			js_bytes_raw = js_file.read_bytes()
+			# Place constants, such as $this, $all ...
+			js_bytes = self.place_js_constants(js_bytes_raw)
+
+			# Very basic simplify, such as removing comments
+			simplify = self.btg.cfg['simplify']
+			if simplify > 0:
+				js_lines = js_bytes.split(b'\n')
+				js_bytes = b'\n'.join(
+					filter(self.btg.js_simplify[simplify-1], js_lines)
+				)
+
+			# Create the buffer.
+			# 1 - Write a couple lines, which ensure that the module is defined
+			# 2 - Add the js buffer itself
+			file_buf = io.BytesIO()
+			self.btg.buf_line_write(file_buf, [
+				'\n',
+				'if(!', base_js_path, '){', base_js_path, '={}};',
+				'\n',
+
+				'if(!', base_js_path, '.', self.md_name, '){',
+					base_js_path, '.', self.md_name, '={}};',
+				'\n',
+
+				js_bytes
+			])
+
+			self.buffers['js'].append(
+				(js_file.name, file_buf)
+			)
+
+		return self.buffers['js']
+
+	@property
+	def css_buffers(self):
+		if self.buffers['css'] != None:
+			return self.buffers['css']
+
+		self.buffers['css'] = []
+
+		for css_file in self.file_list:
+			if css_file.suffix != '.css':
+				continue
+
+			css_bytes = css_file.read_bytes()
+
+			ctx_symbol = self.btg.cfg['css_context_symbol']
+			ctx_declare = f'!{ctx_symbol}'.encode()
+			css_lines = css_bytes.split(b'\n')
+			ctx = None
+
+			for li, ln in enumerate(css_lines):
+				# todo: safer detection ?
+				if ctx_declare in ln:
+					ctx = multi_replace(ln, [
+						('/*', ''),
+						('*/', ''),
+						(ctx_declare, '')
+					]).strip()
+					continue
+				# important todo: .encode in advance
+				if ctx_symbol.encode() in ln and ctx:
+					css_lines[li] = multi_replace(ln, [
+						(ctx_symbol, ctx)
+					])
+
+			# todo: is join faster than writing the lines
+			# individually ?
+			self.buffers['css'].append(
+				(
+					css_file.name,
+					io.BytesIO(b'\n'.join(css_lines))
+				)
+			)
+
+
+		return self.buffers['css']
+
+	@property
+	def other_buffers(self):
+		if self.buffers['other'] != None:
+			return self.buffers['other']
+
+		self.buffers['other'] = []
+
+		for arb_file in self.file_list:
+			if arb_file.suffix in self.known_extensions:
+				continue
+
+			arb_bytes_raw = arb_file.read_bytes()
+			arb_bytes = self.place_js_constants(arb_bytes_raw)
+
+			self.buffers['other'].append(
+				(arb_file.name, io.BytesIO(arb_bytes))
+			)
+
+		return self.buffers['other']
+
+
+	def iter_items(self, of_type=None):
+		if not of_type:
+			iter_items = (
+				self.js_buffers,
+				self.css_buffers,
+				self.other_buffers,
+			)
+			for buf_data in iter_items:
+				for fname, buf in buf_data:
+					yield fname, buf
+			return
 
 
 
 # todo: Create custom buffer class
 # with wrap functions and line writes
+
+# todo: As Garry the create of Garry's Mod
+# once said on his very funny blog:
+# "Lua doesn’t have unicode support.
+# This is a pretty big deal in a modern day scripting language,
+# you shouldn’t have to treat strings like binary data"
+# But fuck it, treating shit as binary data = 100% success rate.
 class Bootlegger:
 	def __init__(self, cfg_data):
 		self.cfg = BTGConfig(cfg_data)
@@ -669,7 +863,6 @@ class Bootlegger:
 		# 3 - Try checking relative to config file,
 		#     if possible.
 		if not resolved and self.cfg.cfg_file_dir:
-			print('Final try: resolving shit', self.cfg.cfg_file_dir, query)
 			cfg_dir_rel = (self.cfg.cfg_file_dir / query).resolve()
 			if cfg_dir_rel.exists():
 				resolved = cfg_dir_rel
@@ -696,100 +889,6 @@ class Bootlegger:
 	def base_js_path(self):
 		return f"""{self.cfg['root_module_name']}{self.cfg['sys_name']}"""
 
-	# tgt_module is absolute path
-	def process_module(self, tgt_module_dir):
-		tgt_module_dir = Path(tgt_module_dir)
-		tgt_module_name = tgt_module_dir.basename
-		self.modules[tgt_module_name] = {
-			'js':    [],
-			'css':   [],
-			'other': [],
-		}
-		tgt_module = self.modules[tgt_module_name]
-
-		for file in tgt_module_dir.glob('*'):
-			if not file.is_file():
-				continue
-
-			file_bytes = file.read_bytes()
-			file_buf = io.BytesIO()
-
-			if file.suffix != '.css':
-				file_bytes = multi_replace(file_bytes, [
-					(
-						MODULE_REF,
-						f"""{self.base_js_path}.{tgt_module_name}"""
-					),
-					(
-						SYS_REF,
-						self.base_js_path
-					),
-					(
-						STORAGE_REF,
-						f"""{self.cfg['root_module_name']}{BTG_SYS_CONSTANTS}"""
-					)
-				])
-
-			if file.suffix == '.js':
-				simplify = self.cfg['simplify']
-				if simplify > 0:
-					flines = file_bytes.split(b'\n')
-					file_bytes = b'\n'.join(
-						filter(self.js_simplify[simplify-1], flines)
-					)
-
-				self.buf_line_write(file_buf, [
-					'\n',
-					'if(!', self.base_js_path, '){', self.base_js_path, '={}};',
-					'\n',
-
-					'if(!', self.base_js_path, '.', tgt_module_name, '){',
-						self.base_js_path, '.', tgt_module_name, '={}};',
-					'\n',
-
-					file_bytes
-				])
-				tgt_module['js'].append(
-					(file.name, file_buf)
-				)
-				continue
-
-			if file.suffix == '.css':
-				ctx_symbol = self.cfg['css_context_symbol']
-				ctx_declare = f'!{ctx_symbol}'.encode()
-				css_lines = file_bytes.split(b'\n')
-				ctx = None
-
-				for li, ln in enumerate(css_lines):
-					# todo: safer detection ?
-					if ctx_declare in ln:
-						ctx = multi_replace(ln, [
-							('/*', ''),
-							('*/', ''),
-							(ctx_declare, '')
-						]).strip()
-						continue
-					# important todo: .encode in advance
-					if ctx_symbol.encode() in ln and ctx:
-						css_lines[li] = multi_replace(ln, [
-							(ctx_symbol, ctx)
-						])
-
-				# todo: is join faster than writing the lines
-				# individually ?
-				file_buf.write(
-					b'\n'.join(css_lines)
-				)
-				tgt_module['css'].append(
-					(file.name, file_buf)
-				)
-				continue
-
-			file_buf.write(file_bytes)
-			tgt_module['other'].append(
-				(file.name, file_buf)
-			)
-
 	def process_fonts(self):
 		fonts_dir = self.resolve_path(self.cfg['fonts']['src_dir'])
 		if not fonts_dir:
@@ -806,7 +905,7 @@ class Bootlegger:
 				BTGFont(fnt, url_prefix)
 			)
 
-	def make_modules(self):
+	def init_modules(self):
 		modules_dir = self.resolve_path(self.cfg['jsmodules'])
 		if not modules_dir:
 			print('Modules source dir does not exist')
@@ -814,17 +913,15 @@ class Bootlegger:
 			if not module_dir.is_dir():
 				continue
 
-			self.process_module(module_dir)
+			self.modules[module_dir.name] = ModuleUnit(self, module_dir)
 
 	# Sequentially run everything according to config
 	def run(self):
 		# 1 - Main things first:
 		#     process javascript
-		self.make_modules()
-
-		# 2 - Process fonts, if any:
-		if self.cfg['fonts']['do_fonts'] and not self.cfg['onefile']['onefile_only']:
-			self.process_fonts()
+		self.init_modules()
+		# 2 - Process fonts
+		self.process_fonts()
 
 		module_write_tgt = self.write_paths.modules_out_dir
 		if not module_write_tgt:
@@ -843,12 +940,11 @@ class Bootlegger:
 			# Wipe the write destination dir
 			shutil.rmtree(module_write_tgt, ignore_errors=True)
 
-			for mdname, mdata in self.modules.items():
-				for ftype in ('js', 'css', 'other'):
-					for fname, fbuf in mdata[ftype]:
-						write_tgt = module_write_tgt / mdname / fname
-						write_tgt.parent.mkdir(parents=True, exist_ok=True)
-						write_tgt.write_bytes(fbuf.getvalue())
+			for mdata in self.modules.values():
+				for fname, fbuf in mdata.iter_items():
+					write_tgt = module_write_tgt / mdata.md_name / fname
+					write_tgt.parent.mkdir(parents=True, exist_ok=True)
+					write_tgt.write_bytes(fbuf.getvalue())
 
 		# Write fonts
 		if self.cfg['fonts']['do_fonts'] and not self.cfg['onefile']['onefile_only']:
